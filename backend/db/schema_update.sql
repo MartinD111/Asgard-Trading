@@ -1,0 +1,2 @@
+ALTER TABLE prediction_logs ADD COLUMN IF NOT EXISTS pattern_score NUMERIC(6, 4) DEFAULT 0.0;
+ALTER TABLE prediction_logs ADD COLUMN IF NOT EXISTS agent_used VARCHAR(20) DEFAULT 'math';
