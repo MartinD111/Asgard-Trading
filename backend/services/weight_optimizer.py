@@ -57,7 +57,41 @@ class AgentOptimizer:
         For this simulation, we analyze closed positions tied to predictions.
         """
         async with AsyncSessionLocal() as db:
-            # 1. Find recent CLOSED positions that have an associated prediction log and an agent_used like '%+'
+            from datetime import datetime, timezone
+            # 1. First calculate total daily contribution to see if learning should be blocked
+            acc = await db.execute(text("SELECT equity FROM virtual_accounts WHERE user_id='default'"))
+            row = acc.fetchone()
+            equity = float(row[0]) if row else 100000.0
+
+            today = datetime.now(timezone.utc).date()
+            pnl_query = text("""
+                SELECT SUM(p.realized_pnl)
+                FROM prediction_logs pl
+                JOIN positions p ON pl.position_id = p.id
+                WHERE p.status = 'CLOSED' 
+                  AND pl.agent_used LIKE '%_pro'
+                  AND DATE(p.closed_at) = :today
+            """)
+            res = await db.execute(pnl_query, {"today": today})
+            r = res.fetchone()
+            total_pnl = float(r[0]) if r and r[0] else 0.0
+            
+            total_pct = (total_pnl / equity) * 100 if equity > 0 else 0.0
+            
+            # Check active blocked status
+            blocked_raw = await self.redis.get("algo:learning_blocked")
+            is_blocked = (blocked_raw and blocked_raw.decode() == "true")
+            
+            if total_pct >= 1.0 and not is_blocked:
+                await self.redis.set("algo:learning_blocked", "true")
+                logger.info(f"Asgard Pro daily contribution reached {total_pct:.2f}%. Learning BLOCKED.")
+                is_blocked = True
+            elif total_pct <= 0.5 and is_blocked:
+                await self.redis.set("algo:learning_blocked", "false")
+                logger.info(f"Asgard Pro daily contribution dropped to {total_pct:.2f}%. Learning RESUMED.")
+                is_blocked = False
+
+            # 2. Find recent CLOSED positions that have an associated prediction log and an agent_used like '%+'
             query = text("""
                 SELECT 
                     pl.id, pl.agent_used, pl.direction, pl.technical_score, 
@@ -103,22 +137,26 @@ class AgentOptimizer:
                 
                 for component, score in scores.items():
                     # Simplified RL reward logic:
-                    if is_win:
-                        if score > 0.6: 
-                            weights[component] += LEARNING_RATE # Reward
-                        elif score < 0.4:
-                            weights[component] -= LEARNING_RATE # Punish (it doubted a winning trade)
-                    else:
-                        if score > 0.6:
-                            weights[component] -= LEARNING_RATE # Punish (it pushed a losing trade)
-                        elif score < 0.4:
-                            weights[component] += LEARNING_RATE # Reward (it correctly doubted a losing trade)
-                            
-                    # Clamp weights
-                    weights[component] = max(MIN_WEIGHT, min(MAX_WEIGHT, weights[component]))
+                    # Only apply weight updates if we are NOT blocked from learning
+                    if not is_blocked:
+                        if is_win:
+                            if score > 0.6: 
+                                weights[component] += LEARNING_RATE # Reward
+                            elif score < 0.4:
+                                weights[component] -= LEARNING_RATE # Punish (it doubted a winning trade)
+                        else:
+                            if score > 0.6:
+                                weights[component] -= LEARNING_RATE # Punish (it pushed a losing trade)
+                            elif score < 0.4:
+                                weights[component] += LEARNING_RATE # Reward (it correctly doubted a losing trade)
+                                
+                        # Clamp weights
+                        weights[component] = max(MIN_WEIGHT, min(MAX_WEIGHT, weights[component]))
 
                 # Mark log as evaluated (mock outcome)
                 outcome_str = 'WIN' if is_win else 'LOSS'
+                if is_blocked:
+                    outcome_str += '_SKIPPED_LEARNING'
                 await db.execute(
                     text("UPDATE prediction_logs SET outcome = :o WHERE id = :id"),
                     {"o": outcome_str, "id": log_id}

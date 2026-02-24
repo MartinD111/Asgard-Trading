@@ -22,3 +22,7 @@ backend/.pytest_cache/
 .idea/
 .vscode/
 *.log
+desktop.ini
+
+# Extra Python Envs
+backend/venv*/

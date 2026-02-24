@@ -95,3 +95,52 @@ async def get_what_if_stats(
         output[agent] = agent_data
         
     return output
+
+@router.get("/daily_contribution")
+async def get_daily_contribution(db: AsyncSession = Depends(get_db)):
+    import redis.asyncio as aioredis
+    redis_client = aioredis.from_url(os.getenv("REDIS_URL", "redis://redis:6379"))
+
+    # Get current equity
+    acc = await db.execute(text("SELECT equity FROM virtual_accounts WHERE user_id='default'"))
+    row = acc.fetchone()
+    equity = float(row[0]) if row else 100000.0
+
+    today = datetime.now(timezone.utc).date()
+    
+    query = text("""
+        SELECT pl.agent_used, SUM(p.realized_pnl)
+        FROM prediction_logs pl
+        JOIN positions p ON pl.position_id = p.id
+        WHERE p.status = 'CLOSED' 
+          AND pl.agent_used LIKE '%_pro'
+          AND DATE(p.closed_at) = :today
+        GROUP BY pl.agent_used
+    """)
+    result = await db.execute(query, {"today": today})
+    rows = result.fetchall()
+    
+    agents = {"loki_pro": 0.0, "thor_pro": 0.0, "odin_pro": 0.0}
+    total_pnl = 0.0
+    
+    for r in rows:
+        agent = str(r[0])
+        pnl = float(r[1]) if r[1] else 0.0
+        agents[agent] = pnl
+        total_pnl += pnl
+        
+    total_pct = (total_pnl / equity) * 100 if equity > 0 else 0.0
+    agents_pct = {k: (v / equity) * 100 for k, v in agents.items()}
+    
+    # Check if learning is blocked
+    blocked_raw = await redis_client.get("algo:learning_blocked")
+    is_blocked = (blocked_raw and blocked_raw.decode() == "true")
+    
+    return {
+        "agents_pnl": agents,
+        "agents_pct": agents_pct,
+        "total_pnl": total_pnl,
+        "total_pct": total_pct,
+        "learning_blocked": is_blocked is True
+    }
+

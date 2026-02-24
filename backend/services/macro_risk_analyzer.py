@@ -17,7 +17,7 @@ from services.news_monitor import NewsMonitor
 logger = logging.getLogger(__name__)
 
 SYSTEM_PROMPT = """You are a Chief Risk Officer for a quantitative hedge fund.
-Analyze the provided global macro news headlines and determine the current Market Risk Regime.
+Analyze the provided global macro news headlines and determine the current Market Risk Regime, as well as the optimal allocation of funds across short, medium, and long-term trading strategies.
 You MUST respond with ONLY a valid JSON object — strictly no markdown formatting.
 
 Required JSON schema:
@@ -25,8 +25,15 @@ Required JSON schema:
   "regime": "<'Risk-On' | 'Risk-Off' | 'Neutral' | 'High-Volatility-Panic'>",
   "risk_multiplier": <float 0.1 to 1.5>,
   "expected_global_volatility": <float, expected percentage swing>,
-  "reasoning": "<Short explanation of why the market is in this regime>"
+  "reasoning": "<Short explanation of why the market is in this regime>",
+  "recommended_allocations": {
+    "short_term": <integer percentage, e.g. 40>,
+    "medium_term": <integer percentage, e.g. 40>,
+    "long_term": <integer percentage, e.g. 20>
+  }
 }
+
+The sum of recommended_allocations must always equal exactly 100.
 
 Multiplier Guidelines:
 - Risk-On: 1.0 to 1.5 (Expand position sizes, market is stable/growing)
@@ -81,6 +88,7 @@ class MacroRiskAnalyzer:
             multiplier = float(data.get("risk_multiplier", 1.0))
             volatility = float(data.get("expected_global_volatility", 1.0))
             reasoning = data.get("reasoning", "")
+            allocations = data.get("recommended_allocations", {"short_term": 40, "medium_term": 40, "long_term": 20})
 
             # Ensure safe bounds
             multiplier = max(0.1, min(1.5, multiplier))
@@ -90,16 +98,37 @@ class MacroRiskAnalyzer:
                 "risk_multiplier": multiplier,
                 "expected_global_volatility": volatility,
                 "reasoning": reasoning,
+                "recommended_allocations": allocations,
                 "timestamp": time.time()
             }
             
-            logger.info(f"Macro Risk Result: Regime={regime}, Multiplier={multiplier:.2f}")
+            logger.info(f"Macro Risk Result: Regime={regime}, Multiplier={multiplier:.2f}, Auto-Allocations={allocations}")
             
             if self.redis:
                 await self.redis.set("macro:risk_profile", json.dumps(result))
                 # Expose specific values for fast access
                 await self.redis.set("macro:risk_multiplier", str(multiplier))
                 await self.redis.set("macro:expected_volatility", str(volatility))
+                
+                # Check if auto allocation is enabled
+                auto_alloc_raw = await self.redis.get("config:algo:auto_allocation")
+                if auto_alloc_raw and auto_alloc_raw.decode() == "true":
+                    logger.info("Applying Gemini AI Auto-Allocations to algorithms")
+                    await self.redis.set("config:algo:short_allocation", str(allocations.get("short_term", 40)))
+                    await self.redis.set("config:algo:medium_allocation", str(allocations.get("medium_term", 40)))
+                    await self.redis.set("config:algo:long_allocation", str(allocations.get("long_term", 20)))
+                    
+                    # Notify frontend about allocation changes
+                    if self.ws_manager:
+                        alloc_msg = {
+                            "type": "ALLOCATION_UPDATE",
+                            "payload": {
+                                "short": allocations.get("short_term", 40),
+                                "medium": allocations.get("medium_term", 40),
+                                "long": allocations.get("long_term", 20)
+                            }
+                        }
+                        await self.ws_manager.broadcast(json.dumps(alloc_msg))
                 
             if self.ws_manager:
                 gemini_msg = {

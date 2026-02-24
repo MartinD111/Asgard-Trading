@@ -27,6 +27,7 @@ class AlgorithmSettings(BaseModel):
     short_strategy: str = "loki_pro"
     medium_strategy: str = "thor_pro"
     long_strategy: str = "odin_pro"
+    auto_allocation: bool = False
 
 @router.get("/")
 async def get_all_config(db: AsyncSession = Depends(get_db)):
@@ -73,6 +74,8 @@ async def update_algorithm_settings(settings: AlgorithmSettings):
     await redis_client.set("config:algo:medium_strategy", getattr(settings, 'medium_strategy', 'thor_pro'))
     await redis_client.set("config:algo:long_strategy", getattr(settings, 'long_strategy', 'odin_pro'))
     
+    await redis_client.set("config:algo:auto_allocation", "true" if settings.auto_allocation else "false")
+    
     return {"status": "success", "message": "Algorithm configuration saved to Redis."}
 
 @router.get("/algorithms")
@@ -92,6 +95,8 @@ async def get_algorithm_settings():
     m_strat = await redis_client.get("config:algo:medium_strategy")
     l_strat = await redis_client.get("config:algo:long_strategy")
     
+    auto_alloc = await redis_client.get("config:algo:auto_allocation")
+    
     return {
         "short_term_active": s_active.decode() == "true" if s_active else True,
         "medium_term_active": m_active.decode() == "true" if m_active else True,
@@ -101,7 +106,8 @@ async def get_algorithm_settings():
         "long_allocation": float(l_alloc.decode()) if l_alloc else 20.0,
         "short_strategy": s_strat.decode() if s_strat else "loki_pro",
         "medium_strategy": m_strat.decode() if m_strat else "thor_pro",
-        "long_strategy": l_strat.decode() if l_strat else "odin_pro"
+        "long_strategy": l_strat.decode() if l_strat else "odin_pro",
+        "auto_allocation": auto_alloc.decode() == "true" if auto_alloc else False
     }
 
 @router.get("/agent/stats")
@@ -145,6 +151,23 @@ async def get_agent_stats(db: AsyncSession = Depends(get_db)):
             "total_trades": total,
             "winrate": winrate
         }
+
+@router.post("/algorithms/auto-allocation")
+async def toggle_auto_allocation():
+    import redis.asyncio as aioredis
+    redis_client = aioredis.from_url(os.getenv("REDIS_URL", "redis://redis:6379"))
+    
+    current = await redis_client.get("config:algo:auto_allocation")
+    is_auto = (current and current.decode() == "true")
+    new_val = "false" if is_auto else "true"
+    
+    await redis_client.set("config:algo:auto_allocation", new_val)
+    
+    # If enabling, let's trigger a fast cycle of the macro analyzer if possible.
+    # We can just let the analyzer pick it up on its next hourly cycle, 
+    # but returning success is enough for now.
+    
+    return {"auto_allocation": new_val == "true"}
         
 class AlgorithmSettingsReset(BaseModel):
     amount: float
