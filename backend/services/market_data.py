@@ -180,54 +180,67 @@ class MarketDataService:
             logger.error(f"Alpaca feed error: {e}. Falling back to simulation.")
             await self._simulate_feed(ALPACA_SYMBOLS, base_price=150.0, drift=0.0001)
 
-    # ─── Binance WebSocket ──────────────────────────────────────
+    # ─── Coinbase WebSocket (Replaced Binance) ──────────────────────────────────────
     async def _binance_feed(self):
-        """Stream trades from Binance."""
+        """Stream trades from Coinbase as reliable public alternative to Binance."""
         try:
-            from binance import AsyncClient, BinanceSocketManager
-
-            config = await self._get_db_config()
-            api_key = config.get("BINANCE_API_KEY") or os.getenv("BINANCE_API_KEY", "")
-            secret = config.get("BINANCE_SECRET_KEY") or os.getenv("BINANCE_SECRET_KEY", "")
-
-            if not api_key:
-                logger.warning("BINANCE_API_KEY not set — using simulated data")
-                await self._simulate_feed(BINANCE_PAIRS, base_price=50000.0, drift=0.0002)
-                return
-
-            client = await AsyncClient.create(api_key, secret)
-            bm = BinanceSocketManager(client)
-
-            async with bm.multiplex_socket(
-                [f"{p.lower()}@trade" for p in BINANCE_PAIRS]
-            ) as stream:
+            import websockets
+            
+            # Map our symbols to Coinbase product IDs
+            symbol_map = {"BTCUSDT": "BTC-USD", "ETHUSDT": "ETH-USD", "SOLUSDT": "SOL-USD"}
+            reverse_map = {v: k for k, v in symbol_map.items()}
+            
+            uri = "wss://ws-feed.exchange.coinbase.com"
+            async with websockets.connect(uri) as websocket:
+                subscribe_msg = {
+                    "type": "subscribe",
+                    "product_ids": list(symbol_map.values()),
+                    "channels": ["ticker"]
+                }
+                await websocket.send(json.dumps(subscribe_msg))
+                
                 while self._running:
-                    msg = await stream.recv()
-                    data = msg.get("data", {})
-                    if data.get("e") == "trade":
-                        symbol = data["s"]
-                        price = float(data["p"])
-                        qty = float(data["q"])
-                        await self._on_tick(symbol, price, qty)
+                    msg_str = await websocket.recv()
+                    data = json.loads(msg_str)
+                    
+                    if data.get("type") == "ticker":
+                        cb_symbol = data.get("product_id")
+                        if cb_symbol in reverse_map:
+                            our_symbol = reverse_map[cb_symbol]
+                            price = float(data.get("price", 0.0))
+                            qty = float(data.get("last_size", 0.0))
+                            if price > 0:
+                                await self._on_tick(our_symbol, price, qty)
 
         except Exception as e:
-            logger.error(f"Binance feed error: {e}. Falling back to simulation.")
-            await self._simulate_feed(BINANCE_PAIRS, base_price=50000.0, drift=0.0002)
+            logger.error(f"Coinbase feed error: {e}.")
+            # Fallback to simulation only on complete failure
+            base_prices = {"BTCUSDT": 65420.0, "ETHUSDT": 3450.0, "SOLUSDT": 145.0}
+            drifts = {"BTCUSDT": 0.0001, "ETHUSDT": 0.0002, "SOLUSDT": 0.0004}
+            await self._simulate_feed(BINANCE_PAIRS, base_prices=base_prices, drifts=drifts)
 
     # ─── Simulation fallback ────────────────────────────────────
     async def _simulate_feed(
         self,
         symbols: list[str],
-        base_price: float = 1.1000,
-        drift: float = 0.00005,
+        base_prices: dict[str, float] = None,
+        drifts: dict[str, float] = None,
         interval: float = 1.0,
     ):
         """Generates synthetic random-walk prices when APIs are unavailable."""
         import random
-        prices = {s: base_price * (1 + random.uniform(-0.05, 0.05)) for s in symbols}
+        
+        # Default fallback if dict not provided
+        if base_prices is None:
+            base_prices = {s: 1.1000 for s in symbols}
+        if drifts is None:
+            drifts = {s: 0.00005 for s in symbols}
+            
+        prices = {s: base_prices.get(s, 100.0) * (1 + random.uniform(-0.02, 0.02)) for s in symbols}
         while self._running:
             for sym in symbols:
-                change = prices[sym] * random.gauss(drift, 0.0005)
+                drift = drifts.get(sym, 0.0005)
+                change = prices[sym] * random.gauss(drift, drift * 10)
                 prices[sym] = max(prices[sym] + change, 0.0001)
                 await self._on_tick(sym, prices[sym], abs(random.gauss(1000, 200)))
             await asyncio.sleep(interval)
