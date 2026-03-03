@@ -84,10 +84,12 @@ class DecisionEngine:
         predictor: GeminiPredictor,
         redis: aioredis.Redis,
         ws_manager,
+        ws_channel: str = "real",
     ):
         self.predictor = predictor
         self.redis = redis
         self.ws_manager = ws_manager
+        self.ws_channel = ws_channel
         self.risk = RiskManager()
         self.news = NewsMonitor()
         self._symbol_scores: dict[str, float] = {}
@@ -113,6 +115,13 @@ class DecisionEngine:
 
     async def _cycle(self, timeframe: str):
         """Analysis cycle over all symbols, customized per timeframe."""
+        # Hard execution gate (used to "freeze" real trading during simulation).
+        # When disabled, the real engine does not analyse, broadcast or execute.
+        if self.ws_channel == "real":
+            raw_enabled = await self.redis.get("execution:real_enabled")
+            if (raw_enabled or b"true").decode() != "true":
+                return
+
         # 0. Check if timeframe is enabled in frontend settings
         raw_config = await self.redis.get(f"config:algo:{timeframe}_enabled")
         is_enabled = (raw_config or b"true").decode() == "true"
@@ -168,7 +177,7 @@ class DecisionEngine:
                 for item in news_items[:3] # Send top 3 news to UI
             ]
             for msg in news_msgs:
-                await self.ws_manager.broadcast(json.dumps(msg))
+                await self.ws_manager.broadcast(json.dumps(msg), channel=self.ws_channel)
 
         # 3. Gemini prediction
         prediction = await self.predictor.predict(symbol, candles, news_items)
@@ -185,7 +194,7 @@ class DecisionEngine:
                      "reasoning": f"[{symbol}] {prediction.reasoning}"
                  }
              }
-             await self.ws_manager.broadcast(json.dumps(gemini_msg))
+             await self.ws_manager.broadcast(json.dumps(gemini_msg), channel=self.ws_channel)
 
         # 4. Technical score
         tech_score = _calculate_technical_score(candles)
@@ -267,7 +276,7 @@ class DecisionEngine:
                     "timestamp": datetime.now(timezone.utc).isoformat(),
                     "detected_pattern": pattern_data["pattern"],
                 }
-                await self.ws_manager.broadcast(json.dumps(payload))
+                await self.ws_manager.broadcast(json.dumps(payload), channel=self.ws_channel)
 
                 # Check execution conditions
                 auto_mode = await self.redis.get("config:auto_mode")
@@ -408,4 +417,4 @@ class DecisionEngine:
             "take_profit": take_profit,
             "position_id": pos_id,
         })
-        await self.ws_manager.broadcast(trade_msg)
+        await self.ws_manager.broadcast(trade_msg, channel=self.ws_channel)

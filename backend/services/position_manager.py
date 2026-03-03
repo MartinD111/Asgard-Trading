@@ -26,6 +26,11 @@ class PositionManager:
         logger.info(f"PositionManager started (Interval: {self.interval}s)")
         while True:
             try:
+                # Hard execution gate (freeze real trading processes).
+                raw_enabled = await self.redis.get("execution:real_enabled")
+                if (raw_enabled or b"true").decode() != "true":
+                    await asyncio.sleep(self.interval)
+                    continue
                 await self._check_positions()
             except Exception as e:
                 logger.error(f"Error in PositionManager cycle: {e}")

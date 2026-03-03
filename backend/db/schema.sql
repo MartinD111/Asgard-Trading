@@ -24,9 +24,9 @@ ON CONFLICT (username) DO NOTHING;
 CREATE TABLE IF NOT EXISTS virtual_accounts (
     id          UUID PRIMARY KEY DEFAULT uuid_generate_v4(),
     user_id     VARCHAR(64) UNIQUE NOT NULL DEFAULT 'default',
-    balance     NUMERIC(18, 4) NOT NULL DEFAULT 10000.00,
-    equity      NUMERIC(18, 4) NOT NULL DEFAULT 10000.00,
-    peak_equity NUMERIC(18, 4) NOT NULL DEFAULT 10000.00,
+    balance     NUMERIC(18, 4) NOT NULL DEFAULT 0.00,
+    equity      NUMERIC(18, 4) NOT NULL DEFAULT 0.00,
+    peak_equity NUMERIC(18, 4) NOT NULL DEFAULT 0.00,
     drawdown    NUMERIC(6, 4) NOT NULL DEFAULT 0.0,
     created_at  TIMESTAMPTZ DEFAULT NOW(),
     updated_at  TIMESTAMPTZ DEFAULT NOW()
@@ -34,8 +34,62 @@ CREATE TABLE IF NOT EXISTS virtual_accounts (
 
 -- Insert default paper-trading account
 INSERT INTO virtual_accounts (user_id, balance, equity, peak_equity)
-VALUES ('default', 10000.00, 10000.00, 10000.00)
+VALUES ('default', 0.00, 0.00, 0.00)
 ON CONFLICT (user_id) DO NOTHING;
+
+-- ─── Simulation Sessions (isolated execution context) ─────────
+CREATE TABLE IF NOT EXISTS simulation_sessions (
+    id              UUID PRIMARY KEY DEFAULT uuid_generate_v4(),
+    user_id         VARCHAR(64) NOT NULL DEFAULT 'default',
+    initial_balance NUMERIC(18, 4) NOT NULL DEFAULT 0.00,
+    currency        VARCHAR(8) NOT NULL DEFAULT 'EUR',
+    started_at      TIMESTAMPTZ DEFAULT NOW(),
+    ended_at        TIMESTAMPTZ,
+    status          VARCHAR(16) NOT NULL DEFAULT 'RUNNING' CHECK (status IN ('RUNNING','STOPPED'))
+);
+
+CREATE INDEX IF NOT EXISTS idx_sim_sessions_user ON simulation_sessions(user_id);
+CREATE INDEX IF NOT EXISTS idx_sim_sessions_status ON simulation_sessions(status);
+
+CREATE TABLE IF NOT EXISTS simulation_accounts (
+    session_id  UUID PRIMARY KEY REFERENCES simulation_sessions(id) ON DELETE CASCADE,
+    balance     NUMERIC(18, 4) NOT NULL DEFAULT 0.00,
+    equity      NUMERIC(18, 4) NOT NULL DEFAULT 0.00,
+    peak_equity NUMERIC(18, 4) NOT NULL DEFAULT 0.00,
+    drawdown    NUMERIC(6, 4) NOT NULL DEFAULT 0.0,
+    created_at  TIMESTAMPTZ DEFAULT NOW(),
+    updated_at  TIMESTAMPTZ DEFAULT NOW()
+);
+
+CREATE TABLE IF NOT EXISTS simulation_trades (
+    id              UUID PRIMARY KEY DEFAULT uuid_generate_v4(),
+    session_id      UUID NOT NULL REFERENCES simulation_sessions(id) ON DELETE CASCADE,
+    symbol          VARCHAR(20) NOT NULL,
+    side            VARCHAR(4) NOT NULL CHECK (side IN ('BUY','SELL')),
+    quantity        NUMERIC(18, 8) NOT NULL,
+    entry_price     NUMERIC(18, 6) NOT NULL,
+    current_price   NUMERIC(18, 6),
+    stop_loss       NUMERIC(18, 6),
+    take_profit     NUMERIC(18, 6),
+    unrealized_pnl  NUMERIC(18, 4) DEFAULT 0.0,
+    status          VARCHAR(10) NOT NULL DEFAULT 'OPEN' CHECK (status IN ('OPEN','CLOSED')),
+    opened_at       TIMESTAMPTZ DEFAULT NOW(),
+    closed_at       TIMESTAMPTZ,
+    close_price     NUMERIC(18, 6),
+    realized_pnl    NUMERIC(18, 4)
+);
+
+CREATE INDEX IF NOT EXISTS idx_sim_trades_session_status ON simulation_trades(session_id, status);
+
+CREATE TABLE IF NOT EXISTS simulation_logs (
+    id          UUID PRIMARY KEY DEFAULT uuid_generate_v4(),
+    session_id  UUID NOT NULL REFERENCES simulation_sessions(id) ON DELETE CASCADE,
+    timestamp   TIMESTAMPTZ DEFAULT NOW(),
+    level       VARCHAR(10) NOT NULL DEFAULT 'INFO',
+    message     TEXT NOT NULL
+);
+
+CREATE INDEX IF NOT EXISTS idx_sim_logs_session_ts ON simulation_logs(session_id, timestamp DESC);
 
 -- ─── Positions ────────────────────────────────────────────────
 CREATE TABLE IF NOT EXISTS positions (
@@ -112,5 +166,8 @@ INSERT INTO system_config (key, value) VALUES
     ('final_score_threshold', '0.85'),
     ('confidence_threshold', '0.70'),
     ('max_drawdown_limit', '0.10'),
-    ('risk_per_trade', '0.01')
-ON CONFLICT (key) DO NOTHING;
+    ('risk_per_trade', '0.01'),
+    ('BINANCE_API_KEY', 'LTzgHDLrEEB8yXmLGW8RQcUIEDljC6Ym6ewR0OzvEz0XlvVvIwOFnew7t1ihyT36'),
+    ('BINANCE_SECRET_KEY', 'Vy5WctcA7NFRGiEsrYgHFxEGEXMpBqvAKFJnd9Wyd3Ve30D5GZP76Pv9V3umXKmQ'),
+    ('BINANCE_LABEL', 'Asgard-Trading-4920')
+ON CONFLICT (key) DO UPDATE SET value = EXCLUDED.value;

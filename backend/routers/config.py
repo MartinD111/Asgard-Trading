@@ -3,7 +3,7 @@ Config router — read/write system configuration (auto mode toggle, thresholds)
 """
 import os
 import json
-from fastapi import APIRouter, Depends
+from fastapi import APIRouter, Depends, Request
 from pydantic import BaseModel
 from sqlalchemy import text
 from sqlalchemy.ext.asyncio import AsyncSession
@@ -28,6 +28,8 @@ class AlgorithmSettings(BaseModel):
     medium_strategy: str = "thor_pro"
     long_strategy: str = "odin_pro"
     auto_allocation: bool = False
+    auto_kelly: bool = True
+    kelly_percent: float = 1.0
 
 @router.get("/")
 async def get_all_config(db: AsyncSession = Depends(get_db)):
@@ -38,14 +40,18 @@ async def get_all_config(db: AsyncSession = Depends(get_db)):
 @router.post("/")
 async def update_config(update: ConfigUpdate, db: AsyncSession = Depends(get_db)):
     await db.execute(
-        text("UPDATE system_config SET value=:v, updated_at=NOW() WHERE key=:k"),
+        text("""
+            INSERT INTO system_config (key, value, updated_at)
+            VALUES (:k, :v, NOW())
+            ON CONFLICT (key) DO UPDATE SET value = :v, updated_at = NOW()
+        """),
         {"k": update.key, "v": update.value},
     )
     return {"status": "updated", "key": update.key, "value": update.value}
 
 
 @router.post("/toggle-auto")
-async def toggle_auto(db: AsyncSession = Depends(get_db)):
+async def toggle_auto(request: Request, db: AsyncSession = Depends(get_db)):
     result = await db.execute(text("SELECT value FROM system_config WHERE key='auto_mode'"))
     row = result.fetchone()
     current = (row[0] if row else "false").lower() == "true"
@@ -54,6 +60,13 @@ async def toggle_auto(db: AsyncSession = Depends(get_db)):
         text("UPDATE system_config SET value=:v WHERE key='auto_mode'"),
         {"v": new_val},
     )
+    # Keep Redis config in sync (DecisionEngine reads from Redis).
+    try:
+        redis = getattr(request.app.state, "redis", None)
+        if redis is not None:
+            await redis.set("config:auto_mode", new_val)
+    except Exception:
+        pass
     return {"auto_mode": new_val == "true"}
 
 
@@ -75,6 +88,8 @@ async def update_algorithm_settings(settings: AlgorithmSettings):
     await redis_client.set("config:algo:long_strategy", getattr(settings, 'long_strategy', 'odin_pro'))
     
     await redis_client.set("config:algo:auto_allocation", "true" if settings.auto_allocation else "false")
+    await redis_client.set("config:algo:auto_kelly", "true" if settings.auto_kelly else "false")
+    await redis_client.set("config:algo:kelly_percent", str(settings.kelly_percent))
     
     return {"status": "success", "message": "Algorithm configuration saved to Redis."}
 
@@ -96,6 +111,8 @@ async def get_algorithm_settings():
     l_strat = await redis_client.get("config:algo:long_strategy")
     
     auto_alloc = await redis_client.get("config:algo:auto_allocation")
+    auto_kel = await redis_client.get("config:algo:auto_kelly")
+    kel_pct = await redis_client.get("config:algo:kelly_percent")
     
     return {
         "short_term_active": s_active.decode() == "true" if s_active else True,
@@ -107,7 +124,9 @@ async def get_algorithm_settings():
         "short_strategy": s_strat.decode() if s_strat else "loki_pro",
         "medium_strategy": m_strat.decode() if m_strat else "thor_pro",
         "long_strategy": l_strat.decode() if l_strat else "odin_pro",
-        "auto_allocation": auto_alloc.decode() == "true" if auto_alloc else False
+        "auto_allocation": auto_alloc.decode() == "true" if auto_alloc else False,
+        "auto_kelly": auto_kel.decode() == "true" if auto_kel else True,
+        "kelly_percent": float(kel_pct.decode()) if kel_pct else 1.0
     }
 
 @router.get("/agent/stats")
@@ -151,6 +170,8 @@ async def get_agent_stats(db: AsyncSession = Depends(get_db)):
             "total_trades": total,
             "winrate": winrate
         }
+        
+    return stats
 
 @router.post("/algorithms/auto-allocation")
 async def toggle_auto_allocation():

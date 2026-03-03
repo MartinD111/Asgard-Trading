@@ -10,8 +10,8 @@ from fastapi.middleware.cors import CORSMiddleware
 import redis.asyncio as aioredis
 
 from db.database import init_db
-from routers import trades, paypal, config, stats, auth, admin
-from websocket.manager import ws_router, ConnectionManager
+from routers import trades, config, stats, auth, admin, account, simulation
+from sockets.manager import ws_router, ConnectionManager
 from services.market_data import MarketDataService
 from services.decision_engine import DecisionEngine
 from services.gemini_predictor import GeminiPredictor
@@ -45,6 +45,9 @@ async def broadcast_portfolio_loop(ws_man):
                     balance = float(row[0])
                     equity = float(row[1])
                     
+                    # Force the balance/equity to exactly track the database
+                    # Removed redis 'real_portfolio_balance' override here.
+
                     # Fetch basic position data for UI
                     pos_res = await db.execute(
                         text("SELECT symbol, side, quantity, entry_price, current_price FROM positions WHERE status='OPEN'")
@@ -70,7 +73,60 @@ async def broadcast_portfolio_loop(ws_man):
                         }
                     }, default=default_serializer)
                     
-                    await ws_man.broadcast(payload)
+                    await ws_man.broadcast(payload, channel="real")
+
+                # Broadcast active simulation portfolios to their own channels
+                sim_res = await db.execute(
+                    text(
+                        """
+                        SELECT s.id, a.balance, a.equity
+                        FROM simulation_sessions s
+                        JOIN simulation_accounts a ON a.session_id = s.id
+                        WHERE s.status='RUNNING'
+                        """
+                    )
+                )
+                for sim_row in sim_res.fetchall():
+                    sim_id = str(sim_row[0])
+                    sim_balance = float(sim_row[1])
+                    sim_equity = float(sim_row[2])
+
+                    pos_res = await db.execute(
+                        text(
+                            """
+                            SELECT symbol, side, quantity, entry_price, current_price
+                            FROM simulation_trades
+                            WHERE session_id=:sid AND status='OPEN'
+                            """
+                        ),
+                        {"sid": sim_id},
+                    )
+                    sim_positions = [
+                        {
+                            "symbol": p[0],
+                            "side": p[1],
+                            "size": float(p[2]),
+                            "entryPrice": float(p[3]),
+                            "currentPrice": float(p[4]) if p[4] is not None else float(p[3]),
+                            "unrealizedPnl": ((float(p[4]) if p[4] is not None else float(p[3])) - float(p[3]))
+                            * float(p[2])
+                            * (1 if p[1] == "BUY" else -1),
+                        }
+                        for p in pos_res.fetchall()
+                    ]
+
+                    sim_payload = json.dumps(
+                        {
+                            "type": "PORTFOLIO_UPDATE",
+                            "payload": {
+                                "balance": sim_balance,
+                                "equity": sim_equity,
+                                "positions": sim_positions,
+                            },
+                        },
+                        default=default_serializer,
+                    )
+                    await ws_man.broadcast(sim_payload, channel=f"sim:{sim_id}")
                     
         except Exception as e:
             print(f"Portfolio broadcast error: {e}")
@@ -85,18 +141,34 @@ async def lifespan(app: FastAPI):
     # Init DB schema
     await init_db()
 
-    # Redis
+    # Redis & WS
     redis_client = aioredis.from_url(os.getenv("REDIS_URL", "redis://localhost:6379/0"))
     app.state.redis = redis_client
+    app.state.ws_manager = manager
+    # Default execution state: real enabled
+    await redis_client.set("execution:real_enabled", "true")
+    # Sync DB auto_mode -> Redis (DecisionEngine reads from Redis)
+    try:
+        from sqlalchemy import text
+        from db.database import AsyncSessionLocal
+        async with AsyncSessionLocal() as db:
+            res = await db.execute(text("SELECT value FROM system_config WHERE key='auto_mode'"))
+            row = res.fetchone()
+            if row:
+                await redis_client.set("config:auto_mode", str(row[0]).lower())
+    except Exception:
+        pass
 
     # Services
     predictor = GeminiPredictor()
-    engine = DecisionEngine(predictor=predictor, redis=redis_client, ws_manager=manager)
+    engine = DecisionEngine(predictor=predictor, redis=redis_client, ws_manager=manager, ws_channel="real")
     market_service = MarketDataService(redis=redis_client, ws_manager=manager)
     macro_risk = MacroRiskAnalyzer(redis_url=os.getenv("REDIS_URL", "redis://localhost:6379/0"), ws_manager=manager)
     optimizer = AgentOptimizer(redis_client=redis_client)
     pos_manager = PositionManager(redis_client=redis_client)
 
+    from services.broker_balances import fetch_real_balances
+    
     # Background tasks
     tasks = [
         asyncio.create_task(market_service.start()),
@@ -105,6 +177,7 @@ async def lifespan(app: FastAPI):
         asyncio.create_task(broadcast_portfolio_loop(manager)),
         asyncio.create_task(optimizer.run_loop()),
         asyncio.create_task(pos_manager.run_loop()),
+        # asyncio.create_task(fetch_real_balances()),
     ]
 
     yield
@@ -132,9 +205,10 @@ app.add_middleware(
 
 # ─── Routers ────────────────────────────────────────────────
 app.include_router(trades.router, prefix="/api", tags=["Trades"])
-app.include_router(paypal.router, prefix="/api/paypal", tags=["PayPal"])
+app.include_router(account.router, prefix="/api", tags=["Account"])
 app.include_router(config.router, prefix="/api/config", tags=["Config"])
 app.include_router(stats.router, prefix="/api/stats", tags=["Stats"])
+app.include_router(simulation.router, prefix="/api", tags=["Simulation"])
 app.include_router(auth.router)
 app.include_router(admin.router)
 app.include_router(ws_router)
