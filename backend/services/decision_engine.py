@@ -28,7 +28,13 @@ BASE_W_CORRELATION = 0.15
 
 FINAL_SCORE_THRESHOLD = float(os.getenv("FINAL_SCORE_THRESHOLD", "0.85"))
 CONFIDENCE_THRESHOLD = float(os.getenv("CONFIDENCE_THRESHOLD", "0.70"))
-CYCLE_SECONDS = 300  # 5 minutes
+
+# Single continuous evaluation cadence. Trading is no longer time-restricted —
+# the engine evaluates frequently and executes whenever a signal qualifies.
+EVAL_INTERVAL = int(os.getenv("EVAL_INTERVAL", "60"))
+
+# The three selectable agents (one is active at a time, the rest run as what-if).
+AGENTS = ["loki", "thor", "odin"]
 
 ALL_SYMBOLS = ["EUR_USD", "XAU_USD", "XAG_USD", "AAPL", "BTCUSDT"]
 
@@ -95,26 +101,17 @@ class DecisionEngine:
         self._symbol_scores: dict[str, float] = {}
 
     async def run_loop(self):
-        logger.info("DecisionEngine loops starting...")
-        
-        # Run three separate timeframe loops concurrently
-        await asyncio.gather(
-            self._timeframe_loop("short", 300),    # 5 minutes
-            self._timeframe_loop("medium", 3600),  # 1 hour
-            self._timeframe_loop("long", 86400),   # 24 hours
-        )
-
-    async def _timeframe_loop(self, timeframe: str, interval: int):
-        logger.info(f"Started {timeframe.upper()} term engine (Interval: {interval}s)")
+        logger.info("DecisionEngine starting (single continuous engine)...")
+        logger.info(f"Started continuous engine (Interval: {EVAL_INTERVAL}s)")
         while True:
             try:
-                await self._cycle(timeframe)
+                await self._cycle()
             except Exception as e:
-                logger.error(f"DecisionEngine cycle error ({timeframe}): {e}")
-            await asyncio.sleep(interval)
+                logger.error(f"DecisionEngine cycle error: {e}")
+            await asyncio.sleep(EVAL_INTERVAL)
 
-    async def _cycle(self, timeframe: str):
-        """Analysis cycle over all symbols, customized per timeframe."""
+    async def _cycle(self):
+        """Continuous analysis cycle over all symbols for the active agent."""
         # Hard execution gate (used to "freeze" real trading during simulation).
         # When disabled, the real engine does not analyse, broadcast or execute.
         if self.ws_channel == "real":
@@ -122,54 +119,60 @@ class DecisionEngine:
             if (raw_enabled or b"true").decode() != "true":
                 return
 
-        # 0. Check if timeframe is enabled in frontend settings
-        raw_config = await self.redis.get(f"config:algo:{timeframe}_enabled")
+        # 0. Check if the engine is enabled in frontend settings
+        raw_config = await self.redis.get("config:engine_enabled")
         is_enabled = (raw_config or b"true").decode() == "true"
-        
+
         if not is_enabled:
-            logger.debug(f"[{timeframe.upper()}] Strategy disabled by user. Skipping cycle.")
+            logger.debug("Engine disabled by user. Skipping cycle.")
             return
-            
-        # Get allocation percentage for this timeframe
-        raw_alloc = await self.redis.get(f"config:algo:{timeframe}_allocation")
-        allocation_pct = float(raw_alloc or "33.3") / 100.0
 
         # Load global macro risk multiplier
         raw_macro = await self.redis.get("macro:risk_multiplier")
         global_risk = float(raw_macro or "1.0")
-        
-        raw_strategy = await self.redis.get(f"config:algo:{timeframe}_strategy")
-        active_strategy = (raw_strategy or b"math").decode()
-        
-        if timeframe == "short":
-            timeframe_strategies = ["math", "patterns", "loki", "loki_pro"]
-        elif timeframe == "medium":
-            timeframe_strategies = ["math", "patterns", "thor", "thor_pro"]
-        elif timeframe == "long":
-            timeframe_strategies = ["math", "patterns", "odin", "odin_pro"]
-        else:
-            timeframe_strategies = ["math"]
+
+        # Which agent is live? The others are evaluated as what-if for comparison.
+        raw_agent = await self.redis.get("config:active_agent")
+        active_agent = (raw_agent or b"loki").decode()
+        if active_agent not in AGENTS:
+            active_agent = "loki"
 
         for symbol in ALL_SYMBOLS:
             await self._analyse_symbol(
-                symbol=symbol, 
-                timeframe=timeframe, 
-                allocation_pct=allocation_pct, 
-                global_risk=global_risk, 
-                active_strategy=active_strategy,
-                timeframe_strategies=timeframe_strategies
+                symbol=symbol,
+                global_risk=global_risk,
+                active_agent=active_agent,
             )
 
+        # Cycle complete — engine is idle until the next evaluation tick.
+        await self._broadcast_activity("", active_agent, "idle", "Engine idle — waiting for next evaluation")
+
+    async def _broadcast_activity(self, symbol: str, agent: str, stage: str, detail: str):
+        """Emit a live, granular view of what the engine is doing right now."""
+        msg = {
+            "type": "AGENT_ACTIVITY",
+            "payload": {
+                "symbol": symbol,
+                "agent": agent,
+                "stage": stage,
+                "detail": detail,
+                "timestamp": datetime.now(timezone.utc).isoformat(),
+            },
+        }
+        await self.ws_manager.broadcast(json.dumps(msg), channel=self.ws_channel)
+
     async def _analyse_symbol(
-        self, symbol: str, timeframe: str, allocation_pct: float, 
-        global_risk: float, active_strategy: str, timeframe_strategies: list[str]
-    ):        # 1. Get candles from Redis
+        self, symbol: str, global_risk: float, active_agent: str
+    ):
+        # 1. Get candles from Redis
+        await self._broadcast_activity(symbol, active_agent, "fetching_candles", f"Loading {symbol} price candles")
         raw = await self.redis.get(f"candles:{symbol}")
         candles = json.loads(raw) if raw else []
 
         # 2. Get relevant news via RAG
+        await self._broadcast_activity(symbol, active_agent, "analyzing_news", f"Scanning market news for {symbol}")
         news_items = self.news.query_relevant(symbol, n_results=10)
-        
+
         # Broadcast news to GeminiHubView
         if news_items:
             news_msgs = [
@@ -180,6 +183,7 @@ class DecisionEngine:
                 await self.ws_manager.broadcast(json.dumps(msg), channel=self.ws_channel)
 
         # 3. Gemini prediction
+        await self._broadcast_activity(symbol, active_agent, "querying_gemini", f"Querying Gemini AI for {symbol} outlook")
         prediction = await self.predictor.predict(symbol, candles, news_items)
         
         # Broadcast Gemini Chain of Thought to GeminiHubView
@@ -197,9 +201,11 @@ class DecisionEngine:
              await self.ws_manager.broadcast(json.dumps(gemini_msg), channel=self.ws_channel)
 
         # 4. Technical score
+        await self._broadcast_activity(symbol, active_agent, "scoring_technical", f"Calculating technical/momentum score for {symbol}")
         tech_score = _calculate_technical_score(candles)
 
         # 5. Pattern Assessment (Base)
+        await self._broadcast_activity(symbol, active_agent, "analyzing_patterns", f"Detecting chart patterns for {symbol}")
         pattern_data = analyze_patterns(candles)
         pattern_contribution = 0.0
         if pattern_data["pattern"] != "None":
@@ -209,40 +215,38 @@ class DecisionEngine:
             # Append pattern to Gemini reasoning for WebSocket
             prediction.reasoning = f"[PATTERN DETECTED: {pattern_data['pattern']} CONFIDENCE: {pattern_data['confidence']:.2f}] " + prediction.reasoning
 
+        await self._broadcast_activity(symbol, active_agent, "evaluating_correlation", f"Evaluating cross-asset correlation for {symbol}")
         gemini_contribution = prediction.gemini_prob
         correlation_contribution = _calculate_correlation_boost(symbol, self._symbol_scores)
 
-        # 6. Evaluate all timeframe strategies
-        for strategy in timeframe_strategies:
-            is_what_if = strategy != active_strategy
-            
+        # 6. Evaluate all three agents (only the active one executes)
+        await self._broadcast_activity(symbol, active_agent, "computing_score", f"Computing final BUY/SELL score for {symbol}")
+        for strategy in AGENTS:
+            is_what_if = strategy != active_agent
+
             w_tech, w_gem, w_corr, w_pat = 0.0, 0.0, 0.0, 0.0
-            
-            if strategy == "math":
-                if timeframe == "short":
-                    w_tech, w_gem, w_corr, w_pat = 0.70, 0.20, 0.10, 0.0
-                elif timeframe == "medium":
-                    w_tech, w_gem, w_corr, w_pat = 0.30, 0.60, 0.10, 0.0
-                else:
-                    w_tech, w_gem, w_corr, w_pat = 0.20, 0.30, 0.50, 0.0
-            elif strategy == "patterns":
-                w_tech, w_gem, w_corr, w_pat = 0.0, 0.0, 0.0, 1.0
-            elif strategy in ["loki", "thor", "odin"]:
-                w_tech, w_gem, w_corr, w_pat = 0.40, 0.20, 0.0, 0.40
-            elif strategy.endswith("_pro"):
-                key = f"agent:weights:{strategy}"
+
+            if strategy == "loki":
+                # Quant Signals — pure math, AI trends and patterns. No learning.
+                w_tech, w_gem, w_corr, w_pat = 0.40, 0.30, 0.0, 0.30
+            elif strategy == "thor":
+                # Balanced Blend — every signal source weighted equally.
+                w_tech, w_gem, w_corr, w_pat = 0.25, 0.25, 0.25, 0.25
+            elif strategy == "odin":
+                # Self-Learning — reinforcement-learning weights tuned in the Simulator.
+                key = "agent:weights:odin"
                 data = await self.redis.get(key)
                 if data:
                     dyn_weights = json.loads(data)
                 else:
                     from services.weight_optimizer import DEFAULT_WEIGHTS
                     dyn_weights = DEFAULT_WEIGHTS
-                    
+
                 w_tech = dyn_weights.get("math", 0.33)
                 w_gem = dyn_weights.get("gemini", 0.34)
                 w_pat = dyn_weights.get("pattern", 0.33)
                 w_corr = 0.0
-            
+
             final_score = (
                 w_tech * tech_score
                 + w_gem * gemini_contribution
@@ -278,6 +282,20 @@ class DecisionEngine:
                 }
                 await self.ws_manager.broadcast(json.dumps(payload), channel=self.ws_channel)
 
+                # Live BUY/SELL score gauge for the active agent
+                score_msg = {
+                    "type": "AGENT_SCORE",
+                    "payload": {
+                        "symbol": symbol,
+                        "agent": active_agent,
+                        "final_score": final_score,
+                        "direction": direction,
+                        "confidence": prediction.confidence_score,
+                        "timestamp": datetime.now(timezone.utc).isoformat(),
+                    },
+                }
+                await self.ws_manager.broadcast(json.dumps(score_msg), channel=self.ws_channel)
+
                 # Check execution conditions
                 auto_mode = await self.redis.get("config:auto_mode")
                 should_auto = (auto_mode or b"false").decode() == "true"
@@ -288,11 +306,11 @@ class DecisionEngine:
                     and should_auto
                 ):
                     await self._execute_paper_trade(
-                        symbol, direction, prediction, final_score, log_id, allocation_pct, global_risk, timeframe
+                        symbol, direction, prediction, final_score, log_id, global_risk
                     )
 
                 logger.info(
-                    f"[{timeframe.upper()}] [{symbol}] ({strategy}) final={final_score:.3f} gemini={prediction.gemini_prob:.3f} "
+                    f"[{symbol}] ({strategy}) final={final_score:.3f} gemini={prediction.gemini_prob:.3f} "
                     f"tech={tech_score:.3f} conf={prediction.confidence_score:.3f} macro_risk={global_risk:.2f}"
                 )
 
@@ -331,7 +349,7 @@ class DecisionEngine:
 
     async def _execute_paper_trade(
         self, symbol: str, direction: str, prediction, final_score: float, log_id: str,
-        allocation_pct: float, global_risk: float, timeframe: str
+        global_risk: float
     ):
         """Simulates a trade in the virtual wallet."""
         async with AsyncSessionLocal() as db:
@@ -359,10 +377,10 @@ class DecisionEngine:
             take_profit = self.risk.calculate_take_profit(direction, entry_price, stop_loss)
 
             win_prob = prediction.probability_up if direction == "BUY" else prediction.probability_down
-            
-            # Apply frontend strategy allocation limit to usable equity
-            usable_equity = equity * allocation_pct
-            
+
+            # Trading is no longer split by timeframe — size against full equity.
+            usable_equity = equity
+
             # Pass the global_risk multiplier to the risk manager
             qty = self.risk.position_size(usable_equity, entry_price, stop_loss, win_prob, global_risk_multiplier=global_risk)
 

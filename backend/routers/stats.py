@@ -1,6 +1,5 @@
 import os
 import json
-import random
 from datetime import datetime, timedelta, timezone
 from typing import Optional
 
@@ -34,7 +33,7 @@ async def get_market_history(
 
 @router.get("/history")
 async def get_history(
-    timeframe: Optional[str] = Query(None, description="short, medium, or long"),
+    agent: Optional[str] = Query(None, description="loki, thor, or odin"),
     limit: int = Query(50),
     db: AsyncSession = Depends(get_db)
 ):
@@ -46,14 +45,11 @@ async def get_history(
         WHERE pl.trade_executed = TRUE
     """
     params = {"limit": limit}
-    
-    if timeframe == "short":
-        query += " AND pl.agent_used IN ('math', 'patterns', 'loki', 'loki_pro')"
-    elif timeframe == "medium":
-        query += " AND pl.agent_used IN ('math', 'patterns', 'thor', 'thor_pro')"
-    elif timeframe == "long":
-        query += " AND pl.agent_used IN ('math', 'patterns', 'odin', 'odin_pro')"
-        
+
+    if agent in ("loki", "thor", "odin"):
+        query += " AND pl.agent_used = :agent"
+        params["agent"] = agent
+
     query += " ORDER BY pl.timestamp DESC LIMIT :limit"
     
     result = await db.execute(text(query), params)
@@ -79,18 +75,13 @@ async def get_history(
 @router.get("/what_if")
 async def get_what_if_stats(
     request: Request,
-    timeframe: str = Query("short", description="short, medium, long"),
     days: int = Query(30),
     symbol: str = Query("BTCUSDT", description="Trading asset symbol, e.g., BTCUSDT, ETHUSDT"),
     db: AsyncSession = Depends(get_db)
 ):
-    agents_map = {
-        "short": ["math", "patterns", "loki", "loki_pro"],
-        "medium": ["math", "patterns", "thor", "thor_pro"],
-        "long": ["math", "patterns", "odin", "odin_pro"]
-    }
-    tf_agents = agents_map.get(timeframe, ["math"])
-    
+    # All three agents are evaluated every cycle; compare them side by side.
+    tf_agents = ["loki", "thor", "odin"]
+
     output = {
         "price_history": [],
         "cumulative_pnl": {},
@@ -207,21 +198,22 @@ async def get_daily_contribution(db: AsyncSession = Depends(get_db)):
         SELECT pl.agent_used, SUM(p.realized_pnl)
         FROM prediction_logs pl
         JOIN positions p ON pl.position_id = p.id
-        WHERE p.status = 'CLOSED' 
-          AND pl.agent_used LIKE '%_pro'
+        WHERE p.status = 'CLOSED'
+          AND pl.agent_used IN ('loki', 'thor', 'odin')
           AND DATE(p.closed_at) = :today
         GROUP BY pl.agent_used
     """)
     result = await db.execute(query, {"today": today})
     rows = result.fetchall()
-    
-    agents = {"loki_pro": 0.0, "thor_pro": 0.0, "odin_pro": 0.0}
+
+    agents = {"loki": 0.0, "thor": 0.0, "odin": 0.0}
     total_pnl = 0.0
-    
+
     for r in rows:
         agent = str(r[0])
         pnl = float(r[1]) if r[1] else 0.0
-        agents[agent] = pnl
+        if agent in agents:
+            agents[agent] = pnl
         total_pnl += pnl
         
     total_pct = (total_pnl / equity) * 100 if equity > 0 else 0.0

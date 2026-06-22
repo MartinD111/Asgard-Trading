@@ -1,5 +1,5 @@
 """
-Reinforcement Learning Weight Optimizer for 'Loki_Pro', 'Thor_Pro', 'Odin_Pro'.
+Reinforcement Learning Weight Optimizer for 'Odin' — the self-learning agent.
 Periodically evaluates past trades and adjusts algorithm component weights to maximize win rate.
 """
 import asyncio
@@ -68,8 +68,8 @@ class AgentOptimizer:
                 SELECT SUM(p.realized_pnl)
                 FROM prediction_logs pl
                 JOIN positions p ON pl.position_id = p.id
-                WHERE p.status = 'CLOSED' 
-                  AND pl.agent_used LIKE '%_pro'
+                WHERE p.status = 'CLOSED'
+                  AND pl.agent_used = 'odin'
                   AND DATE(p.closed_at) = :today
             """)
             res = await db.execute(pnl_query, {"today": today})
@@ -84,23 +84,23 @@ class AgentOptimizer:
             
             if total_pct >= 1.0 and not is_blocked:
                 await self.redis.set("algo:learning_blocked", "true")
-                logger.info(f"Asgard Pro daily contribution reached {total_pct:.2f}%. Learning BLOCKED.")
+                logger.info(f"Odin daily contribution reached {total_pct:.2f}%. Learning BLOCKED.")
                 is_blocked = True
             elif total_pct <= 0.5 and is_blocked:
                 await self.redis.set("algo:learning_blocked", "false")
-                logger.info(f"Asgard Pro daily contribution dropped to {total_pct:.2f}%. Learning RESUMED.")
+                logger.info(f"Odin daily contribution dropped to {total_pct:.2f}%. Learning RESUMED.")
                 is_blocked = False
 
-            # 2. Find recent CLOSED positions that have an associated prediction log and an agent_used like '%+'
+            # 2. Find recent CLOSED Odin positions with an associated prediction log
             query = text("""
-                SELECT 
-                    pl.id, pl.agent_used, pl.direction, pl.technical_score, 
+                SELECT
+                    pl.id, pl.agent_used, pl.direction, pl.technical_score,
                     pl.pattern_score, pl.gemini_prob,
                     p.entry_price, p.close_price, p.side, p.realized_pnl
                 FROM prediction_logs pl
                 JOIN positions p ON pl.position_id = p.id
-                WHERE p.status = 'CLOSED' 
-                  AND pl.agent_used LIKE '%%_pro'
+                WHERE p.status = 'CLOSED'
+                  AND pl.agent_used = 'odin'
                   AND pl.outcome IS NULL -- Mark outcome so we don't double count
                 ORDER BY p.closed_at ASC LIMIT 50
             """)

@@ -130,8 +130,10 @@ class MarketDataService:
             env = config.get("OANDA_ENVIRONMENT") or os.getenv("OANDA_ENVIRONMENT", "practice")
 
             if not api_key:
-                logger.warning("OANDA_API_KEY not set — using simulated data")
-                await self._simulate_feed(OANDA_INSTRUMENTS)
+                logger.warning(
+                    "OANDA_API_KEY not set — forex/metals feed disabled (no fabricated data). "
+                    "Configure it under Settings → API Keys."
+                )
                 return
 
             client = oandapyV20.API(access_token=api_key, environment=env)
@@ -150,8 +152,7 @@ class MarketDataService:
                 await asyncio.sleep(0)
 
         except Exception as e:
-            logger.error(f"OANDA feed error: {e}. Falling back to simulation.")
-            await self._simulate_feed(OANDA_INSTRUMENTS)
+            logger.error(f"OANDA feed error: {e}. Forex/metals feed stopped (no fabricated data).")
 
     # ─── Alpaca WebSocket ───────────────────────────────────────
     async def _alpaca_feed(self):
@@ -164,8 +165,10 @@ class MarketDataService:
             secret = config.get("ALPACA_SECRET_KEY") or os.getenv("ALPACA_SECRET_KEY", "")
 
             if not api_key:
-                logger.warning("ALPACA_API_KEY not set — using simulated data")
-                await self._simulate_feed(ALPACA_SYMBOLS, base_price=150.0, drift=0.0001)
+                logger.warning(
+                    "ALPACA_API_KEY not set — stocks feed disabled (no fabricated data). "
+                    "Configure it under Settings → API Keys."
+                )
                 return
 
             stream = StockDataStream(api_key, secret)
@@ -177,8 +180,7 @@ class MarketDataService:
             await stream.run()
 
         except Exception as e:
-            logger.error(f"Alpaca feed error: {e}. Falling back to simulation.")
-            await self._simulate_feed(ALPACA_SYMBOLS, base_price=150.0, drift=0.0001)
+            logger.error(f"Alpaca feed error: {e}. Stocks feed stopped (no fabricated data).")
 
     # ─── Coinbase WebSocket (Replaced Binance) ──────────────────────────────────────
     async def _binance_feed(self):
@@ -213,41 +215,23 @@ class MarketDataService:
                                 await self._on_tick(our_symbol, price, qty)
 
         except Exception as e:
-            logger.error(f"Coinbase feed error: {e}.")
-            # Fallback to simulation only on complete failure
-            base_prices = {"BTCUSDT": 65420.0, "ETHUSDT": 3450.0, "SOLUSDT": 145.0}
-            drifts = {"BTCUSDT": 0.0001, "ETHUSDT": 0.0002, "SOLUSDT": 0.0004}
-            await self._simulate_feed(BINANCE_PAIRS, base_prices=base_prices, drifts=drifts)
-
-    # ─── Simulation fallback ────────────────────────────────────
-    async def _simulate_feed(
-        self,
-        symbols: list[str],
-        base_prices: dict[str, float] = None,
-        drifts: dict[str, float] = None,
-        interval: float = 1.0,
-    ):
-        """Generates synthetic random-walk prices when APIs are unavailable."""
-        import random
-        
-        # Default fallback if dict not provided
-        if base_prices is None:
-            base_prices = {s: 1.1000 for s in symbols}
-        if drifts is None:
-            drifts = {s: 0.00005 for s in symbols}
-            
-        prices = {s: base_prices.get(s, 100.0) * (1 + random.uniform(-0.02, 0.02)) for s in symbols}
-        while self._running:
-            for sym in symbols:
-                drift = drifts.get(sym, 0.0005)
-                change = prices[sym] * random.gauss(drift, drift * 10)
-                prices[sym] = max(prices[sym] + change, 0.0001)
-                await self._on_tick(sym, prices[sym], abs(random.gauss(1000, 200)))
-            await asyncio.sleep(interval)
+            logger.error(f"Coinbase feed error: {e}. Crypto feed stopped (no fabricated data).")
 
     # ─── Tick handler ───────────────────────────────────────────
     async def _on_tick(self, symbol: str, price: float, volume: float = 0.0):
-        self.buffer.update(symbol, price, volume)
+        completed = self.buffer.update(symbol, price, volume)
+
+        # Persist live state to Redis so consumers (DecisionEngine, PositionManager,
+        # SimulationEngine) can read the latest price and candle history. Without this
+        # the engines read empty keys and never trade.
+        await self.redis.set(f"last_price:{symbol}", price)
+        # Refresh the rolling candle buffer whenever a candle closes (cheap and keeps
+        # `candles:{symbol}` in sync without writing on every single tick).
+        if completed is not None:
+            await self.redis.set(
+                f"candles:{symbol}", json.dumps(self.buffer.get_candles(symbol))
+            )
+
         tick_msg = json.dumps({"type": "tick", "symbol": symbol, "price": price})
         await self.redis.publish("market:ticks", tick_msg)
         await self.ws_manager.broadcast(tick_msg)

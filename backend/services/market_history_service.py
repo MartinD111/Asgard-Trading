@@ -32,60 +32,6 @@ def _cache_key(symbol: str, range_query: str) -> str:
     return f"market_history:{symbol.upper()}:{range_query.upper()}"
 
 
-def _synthetic_history(symbol: str, range_query: str) -> list[dict[str, Any]]:
-    now = datetime.now(timezone.utc)
-    delta, _interval, limit_points = _RANGE_MAP.get(range_query, _RANGE_MAP["1D"])
-    start_time = now - delta
-
-    import random
-
-    base_prices = {
-        "BTCUSDT": 65420.0,
-        "ETHUSDT": 3450.0,
-        "SOLUSDT": 145.0,
-        "EUR_USD": 1.0845,
-        "XAU_USD": 2345.10,
-        "XAG_USD": 28.40,
-        "AAPL": 175.50,
-        "SPY": 520.0,
-    }
-    drifts = {
-        "BTCUSDT": 0.0001,
-        "ETHUSDT": 0.0002,
-        "SOLUSDT": 0.0004,
-        "EUR_USD": 0.000005,
-        "XAU_USD": 0.00005,
-        "XAG_USD": 0.00006,
-        "AAPL": 0.0001,
-        "SPY": 0.00007,
-    }
-
-    sym = symbol.upper()
-    price = base_prices.get(sym, 100.0)
-    drift = drifts.get(sym, 0.0001)
-
-    step_duration = delta.total_seconds() / max(limit_points, 1)
-    cur_time = start_time
-    cur_price = price * (1 + random.uniform(-0.02, 0.02))
-
-    out: list[dict[str, Any]] = []
-    for _ in range(limit_points):
-        change = cur_price * random.gauss(drift / 2, drift * 5)
-        cur_price = max(cur_price + change, 0.0001)
-        out.append(
-            {
-                "time": cur_time.isoformat(),
-                "open": cur_price * random.uniform(0.999, 1.001),
-                "high": cur_price * random.uniform(1.0, 1.002),
-                "low": cur_price * random.uniform(0.998, 1.0),
-                "close": cur_price,
-                "volume": abs(random.gauss(1000, 200)),
-            }
-        )
-        cur_time += timedelta(seconds=step_duration)
-    return out
-
-
 @dataclass(frozen=True)
 class MarketHistoryService:
     redis: aioredis.Redis
@@ -94,12 +40,11 @@ class MarketHistoryService:
         """
         Returns OHLCV data.
 
-        Contract:
+        Contract (production — no fabricated data):
         - First tries Redis cache.
-        - Otherwise fetches external provider (when applicable), stores result to Redis.
-        - If external provider fails, returns last cached data.
-        - If no cache exists, returns a synthetic fallback.
-        - Never returns an empty list.
+        - Otherwise fetches the real external provider (when applicable), stores result to Redis.
+        - If external provider fails, returns last cached data if present.
+        - If no real data is available, returns an EMPTY list. The UI shows a "no data" state.
         """
         sym = symbol.upper()
         rq = range_query.upper()
@@ -130,7 +75,7 @@ class MarketHistoryService:
             await self.redis.set(cache_key, json.dumps(external), ex=ttl)
             return external
 
-        # External failed or not supported: if cache now exists (race), return it; else synthetic.
+        # External failed or not supported: return cache if it exists (race), else empty.
         cached2 = await self.redis.get(cache_key)
         if cached2:
             try:
@@ -140,11 +85,8 @@ class MarketHistoryService:
             except Exception:
                 pass
 
-        fallback = _synthetic_history(sym, rq)
-        # Cache synthetic too, so UI stays stable on repeated calls.
-        ttl = _TTL_SECONDS.get(rq, 120)
-        await self.redis.set(cache_key, json.dumps(fallback), ex=ttl)
-        return fallback
+        logger.info(f"No real market history available for {sym} ({rq}); returning empty.")
+        return []
 
     async def _fetch_kucoin(self, symbol: str, interval: str, limit_points: int) -> list[dict[str, Any]]:
         import httpx

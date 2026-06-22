@@ -12,7 +12,13 @@
       "Bash(cp \"/c/Users/marti/Downloads/Asgard Design-handoff/asgard-design/project/logo.png\" dashboard/logo.png)",
       "Read(//c/c/Users/marti/AMS d.o.o/Asgard-Trading/**)",
       "Bash(awk '/<script>/{f=1;next}/<\\\\/script>/{f=0}f' index.html)",
-      "Bash(node --check /tmp/asgard.js)"
+      "Bash(node --check /tmp/asgard.js)",
+      "PowerShell($py = \\(Get-Command python -ErrorAction SilentlyContinue\\); if\\(-not $py\\){$py=\\(Get-Command py -ErrorAction SilentlyContinue\\)}; if\\(-not $py\\){$py=\\(Get-Command python3 -ErrorAction SilentlyContinue\\)}; if\\($py\\){ Write-Output \\(\"Using: \"+$py.Source\\) } else { Write-Output \"NO_PYTHON\" })",
+      "Bash(py -3 --version)",
+      "Bash(py -3 -c \"import ast,sys; files=['services/simulation_engine.py','services/market_data.py','routers/simulation.py','main.py']; [ \\(ast.parse\\(open\\(f,encoding='utf-8'\\).read\\(\\)\\), print\\('OK',f\\)\\) for f in files ]\")"
+    ],
+    "additionalDirectories": [
+      "c:\\Users\\marti\\.claude\\projects\\c--Users-marti-AMS-d-o-o-Asgard-Trading\\memory"
     ]
   }
 }

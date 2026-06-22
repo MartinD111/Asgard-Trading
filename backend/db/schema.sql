@@ -160,14 +160,13 @@ CREATE TABLE IF NOT EXISTS system_config (
     updated_at TIMESTAMPTZ DEFAULT NOW()
 );
 
+-- Non-secret defaults only. API keys (GEMINI_API_KEY, OANDA_*, BINANCE_*) are entered at
+-- runtime via Settings → API Keys and stored in this table — never committed to source.
 INSERT INTO system_config (key, value) VALUES
     ('trading_mode', 'PAPER'),
     ('auto_mode', 'false'),
     ('final_score_threshold', '0.85'),
     ('confidence_threshold', '0.70'),
     ('max_drawdown_limit', '0.10'),
-    ('risk_per_trade', '0.01'),
-    ('BINANCE_API_KEY', 'LTzgHDLrEEB8yXmLGW8RQcUIEDljC6Ym6ewR0OzvEz0XlvVvIwOFnew7t1ihyT36'),
-    ('BINANCE_SECRET_KEY', 'Vy5WctcA7NFRGiEsrYgHFxEGEXMpBqvAKFJnd9Wyd3Ve30D5GZP76Pv9V3umXKmQ'),
-    ('BINANCE_LABEL', 'Asgard-Trading-4920')
-ON CONFLICT (key) DO UPDATE SET value = EXCLUDED.value;
+    ('risk_per_trade', '0.01')
+ON CONFLICT (key) DO NOTHING;

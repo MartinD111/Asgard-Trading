@@ -206,6 +206,88 @@ async def get_simulation_trade_history(
     return out
 
 
+@router.get("/{simulation_id}/stats/summary")
+async def get_simulation_summary(simulation_id: str, db: AsyncSession = Depends(get_db)):
+    """
+    Honest, computed-from-trades summary for the simulator UI.
+    Win rate, totals and P&L are derived from `simulation_trades`, never faked.
+    """
+    res = await db.execute(
+        text(
+            """
+            SELECT
+                COUNT(*) FILTER (WHERE status='CLOSED')                       AS closed,
+                COUNT(*) FILTER (WHERE status='CLOSED' AND realized_pnl > 0)  AS wins,
+                COUNT(*) FILTER (WHERE status='OPEN')                         AS open_trades,
+                COUNT(*)                                                      AS total,
+                COALESCE(SUM(realized_pnl) FILTER (WHERE status='CLOSED'), 0) AS realized_pnl
+            FROM simulation_trades
+            WHERE session_id=:sid
+            """
+        ),
+        {"sid": simulation_id},
+    )
+    row = res.fetchone()
+    closed = int(row[0] or 0)
+    wins = int(row[1] or 0)
+    win_rate = (wins / closed * 100.0) if closed > 0 else 0.0
+
+    return {
+        "closed_trades": closed,
+        "wins": wins,
+        "losses": closed - wins,
+        "open_trades": int(row[2] or 0),
+        "total_trades": int(row[3] or 0),
+        "win_rate": round(win_rate, 1),
+        "realized_pnl": float(row[4] or 0.0),
+    }
+
+
+@router.get("/{simulation_id}/logs")
+async def get_simulation_logs(
+    simulation_id: str,
+    limit: int = Query(40, ge=1, le=200),
+    db: AsyncSession = Depends(get_db),
+):
+    res = await db.execute(
+        text(
+            """
+            SELECT timestamp, level, message
+            FROM simulation_logs
+            WHERE session_id=:sid
+            ORDER BY timestamp DESC
+            LIMIT :limit
+            """
+        ),
+        {"sid": simulation_id, "limit": limit},
+    )
+    return [
+        {
+            "timestamp": r[0].isoformat() if r[0] else None,
+            "level": r[1],
+            "message": r[2],
+        }
+        for r in res.fetchall()
+    ]
+
+
+@router.get("/active")
+async def get_active_simulation(db: AsyncSession = Depends(get_db)):
+    """Return the most recent RUNNING session, if any, so the UI can reattach."""
+    res = await db.execute(
+        text(
+            """
+            SELECT id FROM simulation_sessions
+            WHERE status='RUNNING'
+            ORDER BY started_at DESC
+            LIMIT 1
+            """
+        )
+    )
+    row = res.fetchone()
+    return {"simulation_id": str(row[0]) if row else None}
+
+
 def _sim_key(simulation_id: str, suffix: str) -> str:
     return f"sim:{simulation_id}:{suffix}"
 

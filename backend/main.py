@@ -18,6 +18,7 @@ from services.gemini_predictor import GeminiPredictor
 from services.macro_risk_analyzer import MacroRiskAnalyzer
 from services.weight_optimizer import AgentOptimizer
 from services.position_manager import PositionManager
+from services.simulation_engine import SimulationEngine
 
 manager = ConnectionManager()
 redis_client: aioredis.Redis | None = None
@@ -166,6 +167,7 @@ async def lifespan(app: FastAPI):
     macro_risk = MacroRiskAnalyzer(redis_url=os.getenv("REDIS_URL", "redis://localhost:6379/0"), ws_manager=manager)
     optimizer = AgentOptimizer(redis_client=redis_client)
     pos_manager = PositionManager(redis_client=redis_client)
+    sim_engine = SimulationEngine(redis=redis_client, ws_manager=manager)
 
     from services.broker_balances import fetch_real_balances
     
@@ -177,6 +179,7 @@ async def lifespan(app: FastAPI):
         asyncio.create_task(broadcast_portfolio_loop(manager)),
         asyncio.create_task(optimizer.run_loop()),
         asyncio.create_task(pos_manager.run_loop()),
+        asyncio.create_task(sim_engine.run_loop()),
         # asyncio.create_task(fetch_real_balances()),
     ]
 
