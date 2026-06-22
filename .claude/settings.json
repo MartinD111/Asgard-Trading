@@ -1,0 +1,18 @@
+{
+  "permissions": {
+    "allow": [
+      "Bash(ls tailwind.config*)",
+      "Bash(ls postcss.config*)",
+      "Bash(npx tsc *)",
+      "Bash(find \"/c/Users/marti\" -iname \"asgard-design*.zip\" 2>/dev/null; echo \"---downloads---\"; ls -la \"/c/Users/marti/Downloads/\" 2>/dev/null | grep -i asgard)",
+      "Read(//c/Users/marti/**)",
+      "Bash(npm run *)",
+      "Bash(echo \"started pid $!\")",
+      "Bash(mkdir -p dashboard)",
+      "Bash(cp \"/c/Users/marti/Downloads/Asgard Design-handoff/asgard-design/project/logo.png\" dashboard/logo.png)",
+      "Read(//c/c/Users/marti/AMS d.o.o/Asgard-Trading/**)",
+      "Bash(awk '/<script>/{f=1;next}/<\\\\/script>/{f=0}f' index.html)",
+      "Bash(node --check /tmp/asgard.js)"
+    ]
+  }
+}
