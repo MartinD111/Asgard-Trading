@@ -7,6 +7,7 @@ from fastapi import APIRouter, Depends, Query, HTTPException, Request
 from sqlalchemy import text
 from sqlalchemy.ext.asyncio import AsyncSession
 from db.database import get_db
+from routers.auth import get_current_user
 
 router = APIRouter()
 
@@ -183,12 +184,18 @@ async def get_what_if_stats(
     return output
 
 @router.get("/daily_contribution")
-async def get_daily_contribution(db: AsyncSession = Depends(get_db)):
+async def get_daily_contribution(
+    current_user: dict = Depends(get_current_user),
+    db: AsyncSession = Depends(get_db),
+):
     import redis.asyncio as aioredis
     redis_client = aioredis.from_url(os.getenv("REDIS_URL", "redis://redis:6379"))
 
-    # Get current equity
-    acc = await db.execute(text("SELECT equity FROM virtual_accounts WHERE user_id='default'"))
+    uid = str(current_user["id"])
+    acc = await db.execute(
+        text("SELECT equity FROM virtual_accounts WHERE user_id=:uid"),
+        {"uid": uid},
+    )
     row = acc.fetchone()
     equity = float(row[0]) if row else 100000.0
 

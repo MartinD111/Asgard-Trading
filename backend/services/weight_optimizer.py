@@ -1,6 +1,17 @@
 """
-Reinforcement Learning Weight Optimizer for 'Odin' — the self-learning agent.
-Periodically evaluates past trades and adjusts algorithm component weights to maximize win rate.
+Heuristic weight optimizer for 'Odin' — the self-tuning agent.
+
+Evaluates closed trades and nudges per-component weights toward components
+that correctly predicted the outcome, away from those that didn't.
+
+Score conventions (all components in [-1, +1]):
+  tech      technical composite (RSI/MACD/ATR)
+  pattern   pattern-recognizer contribution
+  gemini    Gemini LLM directional probability, remapped to [-1, +1]
+
+Agreement logic: for a BUY trade, a positive score means the component
+agreed with the entry; for a SELL, a negative score means agreement.
+The optimizer rewards agreement on wins, disagreement on losses.
 """
 import asyncio
 import json
@@ -9,18 +20,13 @@ from sqlalchemy import text
 from db.database import AsyncSessionLocal
 import redis.asyncio as aioredis
 
+from services.optimizer_core import (
+    apply_reward, DEFAULT_WEIGHTS, LEARNING_RATE,
+    MAX_WEIGHT, MIN_WEIGHT, AGREEMENT_THRESHOLD,
+)
+
 logger = logging.getLogger(__name__)
 
-# Default starting weights for the self-optimizing agents
-DEFAULT_WEIGHTS = {
-    "math": 0.33,
-    "pattern": 0.33,
-    "gemini": 0.34
-}
-
-LEARNING_RATE = 0.02  # How aggressively the agent shifts weights per evaluation
-MAX_WEIGHT = 0.70     # Cap to avoid relying 100% on one component
-MIN_WEIGHT = 0.05     # Floor to ensure components are never fully ignored
 
 class AgentOptimizer:
     def __init__(self, redis_client: aioredis.Redis):
@@ -58,8 +64,9 @@ class AgentOptimizer:
         """
         async with AsyncSessionLocal() as db:
             from datetime import datetime, timezone
-            # 1. First calculate total daily contribution to see if learning should be blocked
-            acc = await db.execute(text("SELECT equity FROM virtual_accounts WHERE user_id='default'"))
+            # 1. First calculate total daily contribution to see if learning should be blocked.
+            # Use total platform equity as the denominator so the threshold scales with user count.
+            acc = await db.execute(text("SELECT COALESCE(SUM(equity), 100000.0) FROM virtual_accounts"))
             row = acc.fetchone()
             equity = float(row[0]) if row else 100000.0
 
@@ -122,36 +129,18 @@ class AgentOptimizer:
                 
                 weights = agent_updates[agent]
 
-                # Determine trade success based on Realized PNL
                 is_win = float(pnl) > 0
-                
-                # Normalize component scores for fair comparison (assuming they are 0.0 to 1.0)
+
+                # gemini_prob stored as raw [0,1] probability; remap to [-1,+1]
+                raw_gem = float(gem_s) if gem_s is not None else 0.0
                 scores = {
-                    "math": float(tech_s) if tech_s else 0.5,
-                    "pattern": float(pat_s) if pat_s else 0.5,
-                    "gemini": float(gem_s) if gem_s else 0.5
+                    "tech":    float(tech_s) if tech_s is not None else 0.0,
+                    "pattern": float(pat_s)  if pat_s  is not None else 0.0,
+                    "gemini":  (raw_gem - 0.5) * 2,
                 }
-                
-                # Identify which components contributed significantly to the decision
-                # If component score > 0.6, it pushed for the trade. If < 0.4, it pushed against.
-                
-                for component, score in scores.items():
-                    # Simplified RL reward logic:
-                    # Only apply weight updates if we are NOT blocked from learning
-                    if not is_blocked:
-                        if is_win:
-                            if score > 0.6: 
-                                weights[component] += LEARNING_RATE # Reward
-                            elif score < 0.4:
-                                weights[component] -= LEARNING_RATE # Punish (it doubted a winning trade)
-                        else:
-                            if score > 0.6:
-                                weights[component] -= LEARNING_RATE # Punish (it pushed a losing trade)
-                            elif score < 0.4:
-                                weights[component] += LEARNING_RATE # Reward (it correctly doubted a losing trade)
-                                
-                        # Clamp weights
-                        weights[component] = max(MIN_WEIGHT, min(MAX_WEIGHT, weights[component]))
+
+                if not is_blocked:
+                    apply_reward(weights, scores, str(side), is_win)
 
                 # Mark log as evaluated (mock outcome)
                 outcome_str = 'WIN' if is_win else 'LOSS'

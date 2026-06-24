@@ -18,15 +18,14 @@ redis[asyncio]==5.0.4
 # Scheduling
 apscheduler==3.10.4
 
-# AI / ML
+# Encryption (Fernet for per-user broker key storage)
+cryptography==42.0.8
+
+# Rate limiting
+slowapi==0.1.9
+
+# AI / LLM
 google-generativeai==0.7.2
-stable-baselines3==2.3.2
-torch==2.3.0
-gymnasium==0.29.1
-# torch-geometric — install manually with correct CUDA/CPU wheel
-numpy==1.26.4
-pandas==2.2.2
-scikit-learn==1.4.2
 
 # Vector Store / RAG
 chromadb==0.5.3
@@ -41,10 +40,15 @@ feedparser==6.0.11
 requests==2.31.0
 beautifulsoup4==4.12.3
 
-# Finance / Risk
+# Finance / indicators / risk
+numpy==1.26.4
+pandas==2.2.2
+pandas-ta==0.3.14b
 scipy==1.13.0
+
+# Logging
+python-json-logger==2.0.7
 
 # Testing
 pytest==8.2.2
 pytest-asyncio==0.23.7
-httpx==0.27.0

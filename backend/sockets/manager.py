@@ -14,7 +14,8 @@ ws_router = APIRouter()
 class ConnectionManager:
     def __init__(self):
         # Channel-based fanout:
-        # - "real" for the main app
+        # - "real" for the main app (ticks, agent activity, scores)
+        # - "user:<uid>" for per-user portfolio updates
         # - "sim:<simulation_id>" for simulation instances
         self._channels: Dict[str, Set[WebSocket]] = {"real": set()}
 
@@ -26,6 +27,13 @@ class ConnectionManager:
         logger.info(
             f"WS connected. Channel={channel} Total={sum(len(v) for v in self._channels.values())}"
         )
+
+    def subscribe(self, ws: WebSocket, channel: str):
+        """Register an already-accepted socket into an additional channel."""
+        if channel not in self._channels:
+            self._channels[channel] = set()
+        self._channels[channel].add(ws)
+        logger.info(f"WS subscribed to extra channel={channel}")
 
     def disconnect(self, ws: WebSocket):
         for ch in list(self._channels.keys()):
@@ -70,17 +78,39 @@ class ConnectionManager:
 
 
 @ws_router.websocket("/ws/live")
-async def websocket_endpoint(ws: WebSocket):
-    # Access the shared manager via app state
+async def websocket_endpoint(ws: WebSocket, token: Optional[str] = None):
     mgr: ConnectionManager = ws.app.state.ws_manager if hasattr(ws.app.state, "ws_manager") else ConnectionManager()
+
+    # Register in "real" for ticks, agent activity, and scores
     await mgr.connect(ws, channel="real")
+
+    # If a valid JWT is present, also subscribe to the user's private channel
+    # so that PORTFOLIO_UPDATE broadcasts from broadcast_portfolio_loop reach this socket.
+    if token:
+        try:
+            from services.auth_service import verify_token
+            from db.database import AsyncSessionLocal
+            from sqlalchemy import text as _text
+            payload = verify_token(token)
+            if payload:
+                username = payload.get("sub")
+                if username:
+                    async with AsyncSessionLocal() as db:
+                        res = await db.execute(
+                            _text("SELECT id FROM users WHERE username = :u"),
+                            {"u": username},
+                        )
+                        row = res.fetchone()
+                        if row:
+                            mgr.subscribe(ws, f"user:{row[0]}")
+        except Exception:
+            logger.warning("WS token validation failed — connected to real channel only.")
+
     try:
         while True:
-            # Keep alive — also accept client messages (e.g. manual commands)
             data = await ws.receive_text()
             try:
                 msg = json.loads(data)
-                # Handle client-sent commands
                 if msg.get("action") == "ping":
                     await mgr.send_personal(ws, json.dumps({"type": "pong"}))
             except json.JSONDecodeError:

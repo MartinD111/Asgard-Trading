@@ -9,6 +9,7 @@ from sqlalchemy import text
 from sqlalchemy.ext.asyncio import AsyncSession
 
 from db.database import get_db
+from routers.auth import get_current_user, get_current_admin
 
 router = APIRouter()
 
@@ -24,13 +25,16 @@ class AlgorithmSettings(BaseModel):
     kelly_percent: float = 1.0
 
 @router.get("/")
-async def get_all_config(db: AsyncSession = Depends(get_db)):
+async def get_all_config(
+    _: dict = Depends(get_current_user),
+    db: AsyncSession = Depends(get_db),
+):
     result = await db.execute(text("SELECT key, value FROM system_config"))
     return {row[0]: row[1] for row in result.fetchall()}
 
 
 @router.post("/")
-async def update_config(update: ConfigUpdate, db: AsyncSession = Depends(get_db)):
+async def update_config(update: ConfigUpdate, _: dict = Depends(get_current_admin), db: AsyncSession = Depends(get_db)):
     await db.execute(
         text("""
             INSERT INTO system_config (key, value, updated_at)
@@ -71,7 +75,7 @@ async def _set_cfg(db: AsyncSession, key: str, value: str):
 
 
 @router.get("/keys")
-async def get_api_keys(db: AsyncSession = Depends(get_db)):
+async def get_api_keys(_: dict = Depends(get_current_admin), db: AsyncSession = Depends(get_db)):
     """Returns masked presence of each key group — never the raw secrets."""
     gemini = await _get_cfg(db, "GEMINI_API_KEY")
     oanda = await _get_cfg(db, "OANDA_API_KEY")
@@ -92,7 +96,7 @@ async def get_api_keys(db: AsyncSession = Depends(get_db)):
 
 
 @router.post("/keys")
-async def save_api_keys(update: ApiKeysUpdate, db: AsyncSession = Depends(get_db)):
+async def save_api_keys(update: ApiKeysUpdate, _: dict = Depends(get_current_admin), db: AsyncSession = Depends(get_db)):
     """Persists provided secrets to system_config. Fields left null are untouched."""
     mapping = {
         "GEMINI_API_KEY": update.gemini_api_key,
@@ -111,7 +115,7 @@ async def save_api_keys(update: ApiKeysUpdate, db: AsyncSession = Depends(get_db
 
 
 @router.post("/toggle-auto")
-async def toggle_auto(request: Request, db: AsyncSession = Depends(get_db)):
+async def toggle_auto(request: Request, _: dict = Depends(get_current_user), db: AsyncSession = Depends(get_db)):
     result = await db.execute(text("SELECT value FROM system_config WHERE key='auto_mode'"))
     row = result.fetchone()
     current = (row[0] if row else "false").lower() == "true"
@@ -131,7 +135,7 @@ async def toggle_auto(request: Request, db: AsyncSession = Depends(get_db)):
 
 
 @router.post("/algorithms")
-async def update_algorithm_settings(settings: AlgorithmSettings):
+async def update_algorithm_settings(settings: AlgorithmSettings, _: dict = Depends(get_current_user)):
     import redis.asyncio as aioredis
     redis_client = aioredis.from_url(os.getenv("REDIS_URL", "redis://redis:6379"))
 
@@ -145,7 +149,7 @@ async def update_algorithm_settings(settings: AlgorithmSettings):
     return {"status": "success", "message": "Algorithm configuration saved to Redis."}
 
 @router.get("/algorithms")
-async def get_algorithm_settings():
+async def get_algorithm_settings(_: dict = Depends(get_current_user)):
     import redis.asyncio as aioredis
     redis_client = aioredis.from_url(os.getenv("REDIS_URL", "redis://redis:6379"))
 
@@ -162,7 +166,7 @@ async def get_algorithm_settings():
     }
 
 @router.get("/agent/stats")
-async def get_agent_stats(db: AsyncSession = Depends(get_db)):
+async def get_agent_stats(_: dict = Depends(get_current_user), db: AsyncSession = Depends(get_db)):
     """Returns dynamic weights, total trades, and winrate for Odin (the self-learning agent)."""
     import redis.asyncio as aioredis
     redis_client = aioredis.from_url(os.getenv("REDIS_URL", "redis://redis:6379"))
@@ -203,25 +207,24 @@ class AlgorithmSettingsReset(BaseModel):
     amount: float
 
 @router.post("/wallet/reset")
-async def reset_wallet(req: AlgorithmSettingsReset, db: AsyncSession = Depends(get_db)):
-    """
-    Resets the paper trading virtual account to the requested simulation amount.
-    Closes any existing open positions.
-    """
-    amount = req.amount
-    
-    # Force close all open positions
+async def reset_wallet(
+    req: AlgorithmSettingsReset,
+    current_user: dict = Depends(get_current_user),
+    db: AsyncSession = Depends(get_db),
+):
+    """Resets the user's paper trading account and closes their open positions."""
+    uid = str(current_user["id"])
     await db.execute(
-        text("UPDATE positions SET status='CLOSED', closed_at=NOW(), realized_pnl=0 WHERE status='OPEN'")
+        text("UPDATE positions SET status='CLOSED', closed_at=NOW(), realized_pnl=0 WHERE user_id=:uid AND status='OPEN'"),
+        {"uid": uid},
     )
-    
-    # Reset account balances
     await db.execute(
         text("""
-            UPDATE virtual_accounts 
+            UPDATE virtual_accounts
             SET balance = :amt, equity = :amt, peak_equity = :amt, drawdown = 0.0
-            WHERE user_id = 'default'
+            WHERE user_id = :uid
         """),
-        {"amt": amount}
+        {"amt": req.amount, "uid": uid},
     )
-    return {"status": "ok", "message": f"Wallet reset to {amount} (open trades force-closed)."}
+    await db.commit()
+    return {"status": "ok", "message": f"Wallet reset to {req.amount} (open trades force-closed)."}

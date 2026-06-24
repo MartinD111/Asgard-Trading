@@ -15,9 +15,11 @@ from sqlalchemy import text
 
 from db.database import AsyncSessionLocal
 from services.gemini_predictor import GeminiPredictor
+from services.optimizer_core import DEFAULT_WEIGHTS
 from services.risk_manager import RiskManager
 from services.news_monitor import NewsMonitor
-from services.pattern_recognizer import analyze_patterns
+from services.signals import compute_signal
+from brokers.router import get_broker_for_user
 
 logger = logging.getLogger(__name__)
 
@@ -36,35 +38,15 @@ EVAL_INTERVAL = int(os.getenv("EVAL_INTERVAL", "60"))
 # The three selectable agents (one is active at a time, the rest run as what-if).
 AGENTS = ["loki", "thor", "odin"]
 
-ALL_SYMBOLS = ["EUR_USD", "XAU_USD", "XAG_USD", "AAPL", "BTCUSDT"]
+ALL_SYMBOLS = ["EUR_USD", "XAU_USD", "XAG_USD", "BTCUSDT"]
 
 # Simple correlation matrix (static, will be updated by GNN model later)
 CORRELATION_MATRIX = {
     "XAU_USD": {"XAG_USD": 0.85, "EUR_USD": 0.40, "BTCUSDT": 0.30},
     "XAG_USD": {"XAU_USD": 0.85, "EUR_USD": 0.35, "BTCUSDT": 0.28},
     "EUR_USD": {"XAU_USD": 0.40, "XAG_USD": 0.35, "BTCUSDT": 0.20},
-    "BTCUSDT": {"XAU_USD": 0.30, "AAPL": 0.25},
-    "AAPL": {"BTCUSDT": 0.25},
+    "BTCUSDT": {"XAU_USD": 0.30},
 }
-
-
-def _calculate_technical_score(candles: list[dict]) -> float:
-    """
-    Simple technical score: combines RSI-like momentum and trend alignment.
-    Returns value in [-1, +1].
-    """
-    if len(candles) < 14:
-        return 0.0
-
-    closes = [c["close"] for c in candles]
-    # Momentum: last close vs 20-period SMA
-    sma20 = sum(closes[-20:]) / min(20, len(closes))
-    last = closes[-1]
-    momentum = (last - sma20) / sma20
-
-    # Volatility-normalise
-    score = max(-1.0, min(1.0, momentum * 100))
-    return score
 
 
 def _calculate_correlation_boost(symbol: str, scores: dict[str, float]) -> float:
@@ -200,68 +182,54 @@ class DecisionEngine:
              }
              await self.ws_manager.broadcast(json.dumps(gemini_msg), channel=self.ws_channel)
 
-        # 4. Technical score
-        await self._broadcast_activity(symbol, active_agent, "scoring_technical", f"Calculating technical/momentum score for {symbol}")
-        tech_score = _calculate_technical_score(candles)
-
-        # 5. Pattern Assessment (Base)
-        await self._broadcast_activity(symbol, active_agent, "analyzing_patterns", f"Detecting chart patterns for {symbol}")
-        pattern_data = analyze_patterns(candles)
-        pattern_contribution = 0.0
-        if pattern_data["pattern"] != "None":
-            pat_dir_mult = 1.0 if pattern_data["direction"] == "BUY" else -1.0
-            pattern_contribution = pattern_data["confidence"] * pat_dir_mult
-                
-            # Append pattern to Gemini reasoning for WebSocket
-            prediction.reasoning = f"[PATTERN DETECTED: {pattern_data['pattern']} CONFIDENCE: {pattern_data['confidence']:.2f}] " + prediction.reasoning
-
+        # 4–6. Compute signal + correlation, then evaluate each agent
         await self._broadcast_activity(symbol, active_agent, "evaluating_correlation", f"Evaluating cross-asset correlation for {symbol}")
-        gemini_contribution = prediction.gemini_prob
         correlation_contribution = _calculate_correlation_boost(symbol, self._symbol_scores)
 
-        # 6. Evaluate all three agents (only the active one executes)
         await self._broadcast_activity(symbol, active_agent, "computing_score", f"Computing final BUY/SELL score for {symbol}")
         for strategy in AGENTS:
             is_what_if = strategy != active_agent
 
-            w_tech, w_gem, w_corr, w_pat = 0.0, 0.0, 0.0, 0.0
+            # Odin reads dynamic weights from Redis (set by the weight optimizer).
+            # Loki and Thor use the presets defined in signals.AGENT_WEIGHTS.
+            weights: dict | None = None
+            if strategy == "odin":
+                raw_w = await self.redis.get("agent:weights:odin")
+                weights = json.loads(raw_w) if raw_w else DEFAULT_WEIGHTS.copy()
 
-            if strategy == "loki":
-                # Quant Signals — pure math, AI trends and patterns. No learning.
-                w_tech, w_gem, w_corr, w_pat = 0.40, 0.30, 0.0, 0.30
-            elif strategy == "thor":
-                # Balanced Blend — every signal source weighted equally.
-                w_tech, w_gem, w_corr, w_pat = 0.25, 0.25, 0.25, 0.25
-            elif strategy == "odin":
-                # Self-Learning — reinforcement-learning weights tuned in the Simulator.
-                key = "agent:weights:odin"
-                data = await self.redis.get(key)
-                if data:
-                    dyn_weights = json.loads(data)
-                else:
-                    from services.weight_optimizer import DEFAULT_WEIGHTS
-                    dyn_weights = DEFAULT_WEIGHTS
-
-                w_tech = dyn_weights.get("math", 0.33)
-                w_gem = dyn_weights.get("gemini", 0.34)
-                w_pat = dyn_weights.get("pattern", 0.33)
-                w_corr = 0.0
-
-            final_score = (
-                w_tech * tech_score
-                + w_gem * gemini_contribution
-                + w_pat * pattern_contribution
-                + w_corr * correlation_contribution
+            # compute_signal() is now the single source of truth for all agents:
+            # RSI/MACD/ATR technical composite + pattern recognizer + Gemini blend.
+            signal = compute_signal(
+                candles,
+                symbol=symbol,
+                gemini_prob=prediction.gemini_prob,
+                weights=weights,
+                agent=strategy,
             )
-            
+
+            # Thor includes a cross-asset correlation factor (25% weight).
+            # blend: 75% from compute_signal, 25% from correlation.
+            if strategy == "thor":
+                final_score = max(-1.0, min(1.0, signal.final_score * 0.75 + correlation_contribution * 0.25))
+            else:
+                final_score = signal.final_score
+
             if not is_what_if:
                 self._symbol_scores[symbol] = final_score
+                # Annotate Gemini reasoning with any detected pattern for broadcast
+                if signal.pattern_name != "None":
+                    prediction.reasoning = (
+                        f"[PATTERN: {signal.pattern_name} conf={abs(signal.pattern_score):.2f}] "
+                        + prediction.reasoning
+                    )
 
             direction = "BUY" if final_score > 0 else "SELL"
 
             # 7. Log prediction to DB
             log_id = await self._log_prediction(
-                symbol, prediction, tech_score, pattern_contribution, correlation_contribution, final_score, strategy, is_what_if
+                symbol, prediction,
+                signal.technical_score, signal.pattern_score, correlation_contribution,
+                final_score, strategy, is_what_if,
             )
 
             # 8. Push to WebSocket & Execute Trade (Only for active strategy)
@@ -278,11 +246,10 @@ class DecisionEngine:
                     "reasoning": prediction.reasoning,
                     "expected_volatility": prediction.expected_volatility,
                     "timestamp": datetime.now(timezone.utc).isoformat(),
-                    "detected_pattern": pattern_data["pattern"],
+                    "detected_pattern": signal.pattern_name,
                 }
                 await self.ws_manager.broadcast(json.dumps(payload), channel=self.ws_channel)
 
-                # Live BUY/SELL score gauge for the active agent
                 score_msg = {
                     "type": "AGENT_SCORE",
                     "payload": {
@@ -290,28 +257,27 @@ class DecisionEngine:
                         "agent": active_agent,
                         "final_score": final_score,
                         "direction": direction,
-                        "confidence": prediction.confidence_score,
+                        "confidence": signal.confidence,
                         "timestamp": datetime.now(timezone.utc).isoformat(),
                     },
                 }
                 await self.ws_manager.broadcast(json.dumps(score_msg), channel=self.ws_channel)
 
-                # Check execution conditions
                 auto_mode = await self.redis.get("config:auto_mode")
                 should_auto = (auto_mode or b"false").decode() == "true"
 
                 if (
                     abs(final_score) > FINAL_SCORE_THRESHOLD
-                    and prediction.confidence_score > CONFIDENCE_THRESHOLD
+                    and signal.confidence > CONFIDENCE_THRESHOLD
                     and should_auto
                 ):
-                    await self._execute_paper_trade(
+                    await self._execute_trade(
                         symbol, direction, prediction, final_score, log_id, global_risk
                     )
 
                 logger.info(
                     f"[{symbol}] ({strategy}) final={final_score:.3f} gemini={prediction.gemini_prob:.3f} "
-                    f"tech={tech_score:.3f} conf={prediction.confidence_score:.3f} macro_risk={global_risk:.2f}"
+                    f"tech={signal.technical_score:.3f} conf={signal.confidence:.3f} macro_risk={global_risk:.2f}"
                 )
 
     async def _log_prediction(
@@ -347,92 +313,214 @@ class DecisionEngine:
             row = result.fetchone()
             return str(row[0]) if row else ""
 
-    async def _execute_paper_trade(
-        self, symbol: str, direction: str, prediction, final_score: float, log_id: str,
-        global_risk: float
-    ):
-        """Simulates a trade in the virtual wallet."""
+    async def _get_active_user_ids(self) -> list[str]:
+        """Return all user IDs that have a virtual account (eligible for trading)."""
         async with AsyncSessionLocal() as db:
-            # Get equity
-            acc = await db.execute(
-                text("SELECT equity FROM virtual_accounts WHERE user_id='default'")
-            )
-            row = acc.fetchone()
-            if not row:
-                return
-            equity = float(row[0])
+            res = await db.execute(text("SELECT user_id FROM virtual_accounts"))
+            return [str(row[0]) for row in res.fetchall()]
 
-            # Drawdown check
-            if self.risk.check_drawdown(equity):
-                logger.warning(f"Trade blocked for {symbol} — max drawdown reached.")
-                return
-
-            # Pricing
-            price_raw = await self.redis.get(f"last_price:{symbol}")
-            entry_price = float(price_raw or 1.0)
-
-            # ATR placeholder (use 0.5% of price)
-            atr = entry_price * 0.005
-            stop_loss = self.risk.calculate_stop_loss(direction, entry_price, atr)
-            take_profit = self.risk.calculate_take_profit(direction, entry_price, stop_loss)
-
-            win_prob = prediction.probability_up if direction == "BUY" else prediction.probability_down
-
-            # Trading is no longer split by timeframe — size against full equity.
-            usable_equity = equity
-
-            # Pass the global_risk multiplier to the risk manager
-            qty = self.risk.position_size(usable_equity, entry_price, stop_loss, win_prob, global_risk_multiplier=global_risk)
-
-            if qty <= 0:
-                return
-
-            kelly = self.risk.kelly_fraction(win_prob, global_risk_multiplier=global_risk)
-
-            # Insert position
-            pos_result = await db.execute(
-                text(
-                    """INSERT INTO positions
-                    (symbol, side, quantity, entry_price, current_price, stop_loss, take_profit,
-                     final_score, kelly_fraction, status)
-                    VALUES (:sym, :side, :qty, :ep, :ep, :sl, :tp, :fs, :k, 'OPEN')
-                    RETURNING id"""
-                ),
-                {
-                    "sym": symbol,
-                    "side": direction,
-                    "qty": qty,
-                    "ep": entry_price,
-                    "sl": stop_loss,
-                    "tp": take_profit,
-                    "fs": final_score,
-                    "k": kelly,
-                },
-            )
-            pos_row = pos_result.fetchone()
-            pos_id = str(pos_row[0]) if pos_row else None
-
-            # Update prediction log
-            if log_id and pos_id:
+    async def _audit(
+        self,
+        user_id: str | None,
+        event_type: str,
+        order_id: str | None = None,
+        broker: str | None = None,
+        symbol: str | None = None,
+        payload: dict | None = None,
+    ) -> None:
+        """Write one row to the append-only audit_log. Never raises."""
+        try:
+            async with AsyncSessionLocal() as db:
                 await db.execute(
                     text(
-                        "UPDATE prediction_logs SET trade_executed=true, position_id=:pid WHERE id=:lid"
+                        "INSERT INTO audit_log "
+                        "(user_id, event_type, order_id, broker, symbol, payload) "
+                        "VALUES (:uid, :et, :oid, :broker, :sym, :payload::jsonb)"
                     ),
-                    {"pid": pos_id, "lid": log_id},
+                    {
+                        "uid":     user_id,
+                        "et":      event_type,
+                        "oid":     order_id,
+                        "broker":  broker,
+                        "sym":     symbol,
+                        "payload": json.dumps(payload) if payload else None,
+                    },
+                )
+                await db.commit()
+        except Exception as exc:
+            logger.error(f"Audit log write failed ({event_type}): {exc}")
+
+    async def _execute_trade(
+        self,
+        symbol: str,
+        direction: str,
+        prediction,
+        final_score: float,
+        log_id: str,
+        global_risk: float,
+    ):
+        """
+        Executes a trade for every user with a virtual account.
+
+        For each user the flow is:
+          1. Per-user kill-switch check (skip if halted)
+          2. Drawdown check — auto-halt and write DRAWDOWN_HALT on breach
+          3. Route to the appropriate ExecutionBroker (Paper / OANDA / Coinbase)
+          4. Write ORDER_INTENT to audit_log
+          5. Call broker.place_order()
+          6. On fill: insert position + orders row, write BROKER_RESPONSE
+          7. On reject: write ORDER_REJECTED, skip position creation
+        """
+        user_ids = await self._get_active_user_ids()
+        if not user_ids:
+            return
+
+        # Shared market data — fetched once for all users in this cycle
+        price_raw = await self.redis.get(f"last_price:{symbol}")
+        entry_price = float(price_raw or 1.0)
+        atr = entry_price * 0.005
+        stop_loss = self.risk.calculate_stop_loss(direction, entry_price, atr)
+        take_profit = self.risk.calculate_take_profit(direction, entry_price, stop_loss)
+        win_prob = prediction.probability_up if direction == "BUY" else prediction.probability_down
+
+        first_pos_id: str | None = None
+        first_qty: float = 0.0
+
+        for uid in user_ids:
+            # ── 1. Per-user kill switch ──────────────────────────────────────
+            ks_raw = await self.redis.get(f"kill_switch:user:{uid}")
+            if (ks_raw or b"false").decode() == "true":
+                logger.info(f"Trade skipped for {symbol} (user {uid}) — kill switch active.")
+                continue
+
+            async with AsyncSessionLocal() as db:
+                # ── 2. Equity + drawdown check ───────────────────────────────
+                acc = await db.execute(
+                    text("SELECT equity FROM virtual_accounts WHERE user_id = :uid"),
+                    {"uid": uid},
+                )
+                row = acc.fetchone()
+                if not row:
+                    continue
+                equity = float(row[0])
+
+                if self.risk.check_drawdown(equity):
+                    logger.warning(
+                        f"Trade blocked for {symbol} (user {uid}) — max drawdown. Auto-halting."
+                    )
+                    await self.redis.set(f"kill_switch:user:{uid}", "true")
+                    await self._audit(uid, "DRAWDOWN_HALT", symbol=symbol,
+                                      payload={"equity": equity, "symbol": symbol})
+                    continue
+
+                qty = self.risk.position_size(
+                    equity, entry_price, stop_loss, win_prob,
+                    global_risk_multiplier=global_risk,
+                )
+                if qty <= 0:
+                    continue
+                kelly = self.risk.kelly_fraction(win_prob, global_risk_multiplier=global_risk)
+
+                # ── 3. Select broker ─────────────────────────────────────────
+                broker = await get_broker_for_user(uid, symbol, db, self.redis)
+                broker_name = type(broker).__name__.replace("Broker", "").lower()
+
+                # ── 4. Audit intent ──────────────────────────────────────────
+                await self._audit(uid, "ORDER_INTENT", broker=broker_name, symbol=symbol,
+                                  payload={"direction": direction, "quantity": qty,
+                                           "entry_price": entry_price,
+                                           "stop_loss": stop_loss, "take_profit": take_profit})
+
+                # ── 5. Place order ───────────────────────────────────────────
+                result = await broker.place_order(
+                    symbol=symbol, side=direction, quantity=qty,
+                    stop_loss=stop_loss, take_profit=take_profit,
                 )
 
-        logger.info(
-            f"[PAPER TRADE] {direction} {symbol} qty={qty:.4f} @ {entry_price:.5f} "
-            f"SL={stop_loss:.5f} TP={take_profit:.5f}"
-        )
-        trade_msg = json.dumps({
-            "type": "trade_executed",
-            "symbol": symbol,
-            "direction": direction,
-            "quantity": qty,
-            "entry_price": entry_price,
-            "stop_loss": stop_loss,
-            "take_profit": take_profit,
-            "position_id": pos_id,
-        })
-        await self.ws_manager.broadcast(trade_msg, channel=self.ws_channel)
+                if not result.ok:
+                    await self._audit(uid, "ORDER_REJECTED", broker=broker_name, symbol=symbol,
+                                      payload={"error": result.error, "status": result.status})
+                    logger.warning(
+                        f"Order rejected for user {uid} on {symbol} via {broker_name}: {result.error}"
+                    )
+                    continue
+
+                # ── 6. Record fill ───────────────────────────────────────────
+                fill_price = result.filled_price or entry_price
+                fill_qty   = result.filled_qty   or qty
+
+                pos_result = await db.execute(
+                    text(
+                        "INSERT INTO positions "
+                        "(symbol, side, quantity, entry_price, current_price, stop_loss, take_profit, "
+                        " final_score, kelly_fraction, status, user_id) "
+                        "VALUES (:sym, :side, :qty, :ep, :ep, :sl, :tp, :fs, :k, 'OPEN', :uid) "
+                        "RETURNING id"
+                    ),
+                    {
+                        "sym": symbol, "side": direction, "qty": fill_qty, "ep": fill_price,
+                        "sl": stop_loss, "tp": take_profit, "fs": final_score,
+                        "k": kelly, "uid": uid,
+                    },
+                )
+                pos_row = pos_result.fetchone()
+                pos_id  = str(pos_row[0]) if pos_row else None
+
+                ord_result = await db.execute(
+                    text(
+                        "INSERT INTO orders "
+                        "(user_id, position_id, broker, broker_order_id, symbol, side, quantity, "
+                        " requested_price, filled_price, filled_qty, status, stop_loss, take_profit) "
+                        "VALUES (:uid, :pid, :broker, :bid, :sym, :side, :qty, "
+                        "        :rp, :fp, :fq, :st, :sl, :tp) "
+                        "RETURNING id"
+                    ),
+                    {
+                        "uid": uid, "pid": pos_id, "broker": broker_name,
+                        "bid": result.broker_order_id, "sym": symbol, "side": direction,
+                        "qty": fill_qty, "rp": entry_price, "fp": fill_price,
+                        "fq": fill_qty, "st": result.status, "sl": stop_loss, "tp": take_profit,
+                    },
+                )
+                ord_row = ord_result.fetchone()
+                ord_id  = str(ord_row[0]) if ord_row else None
+                await db.commit()
+
+                await self._audit(uid, "BROKER_RESPONSE", order_id=ord_id,
+                                  broker=broker_name, symbol=symbol,
+                                  payload={"broker_order_id": result.broker_order_id,
+                                           "filled_price": fill_price,
+                                           "filled_qty": fill_qty,
+                                           "status": result.status})
+
+                if pos_id and first_pos_id is None:
+                    first_pos_id = pos_id
+                    first_qty    = fill_qty
+
+        # Link prediction log to the first created position
+        if log_id and first_pos_id:
+            async with AsyncSessionLocal() as db:
+                await db.execute(
+                    text("UPDATE prediction_logs SET trade_executed=true, position_id=:pid WHERE id=:lid"),
+                    {"pid": first_pos_id, "lid": log_id},
+                )
+                await db.commit()
+
+        if first_pos_id:
+            logger.info(
+                f"[TRADE] {direction} {symbol} qty≈{first_qty:.4f} @ {entry_price:.5f} "
+                f"SL={stop_loss:.5f} TP={take_profit:.5f} ({len(user_ids)} user(s))"
+            )
+            await self.ws_manager.broadcast(
+                json.dumps({
+                    "type":        "trade_executed",
+                    "symbol":      symbol,
+                    "direction":   direction,
+                    "quantity":    first_qty,
+                    "entry_price": entry_price,
+                    "stop_loss":   stop_loss,
+                    "take_profit": take_profit,
+                    "position_id": first_pos_id,
+                }),
+                channel=self.ws_channel,
+            )

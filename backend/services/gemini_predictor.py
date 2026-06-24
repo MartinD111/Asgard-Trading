@@ -33,6 +33,11 @@ class RateLimiter:
 
 global_gemini_limiter = RateLimiter(58.0)
 
+# Per-symbol prediction cache: symbol → (GeminiPrediction, timestamp)
+# Gemini's expected_volatility horizon is ~4h so caching that long is safe.
+_CACHE_TTL_SECONDS = float(os.getenv("GEMINI_CACHE_TTL", "14400"))  # 4 hours default
+_prediction_cache: dict[str, tuple["GeminiPrediction", float]] = {}
+
 SYSTEM_PROMPT = """You are an expert quantitative analyst and market predictor.
 You will receive a market context window containing OHLCV data, recent news headlines, and macro indicators.
 You MUST respond with ONLY a valid JSON object — no markdown, no explanation outside the JSON.
@@ -107,6 +112,16 @@ Analyse this context and return your probability assessment JSON."""
         news_items: list[str] | None = None,
         macro: dict | None = None,
     ) -> GeminiPrediction:
+        # Return cached prediction if it is still within the TTL window.
+        # This lets technical indicators run every cycle without waiting for
+        # the 58s global rate limiter — Gemini refreshes at most once per TTL.
+        cached = _prediction_cache.get(symbol)
+        if cached is not None:
+            prediction, ts = cached
+            if time.time() - ts < _CACHE_TTL_SECONDS:
+                logger.debug(f"[{symbol}] Gemini cache hit (age {time.time()-ts:.0f}s)")
+                return prediction
+
         # Fetch API key dynamically from DB
         api_key = ""
         async with AsyncSessionLocal() as db:
@@ -160,7 +175,7 @@ Analyse this context and return your probability assessment JSON."""
 
             gemini_prob = (prob_up - prob_down) * confidence
 
-            return GeminiPrediction(
+            prediction = GeminiPrediction(
                 probability_up=prob_up,
                 probability_down=prob_down,
                 confidence_score=confidence,
@@ -168,6 +183,8 @@ Analyse this context and return your probability assessment JSON."""
                 reasoning=reasoning,
                 gemini_prob=gemini_prob,
             )
+            _prediction_cache[symbol] = (prediction, time.time())
+            return prediction
 
         except Exception as e:
             logger.error(f"GeminiPredictor error for {symbol}: {e}")

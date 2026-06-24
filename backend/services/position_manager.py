@@ -38,9 +38,12 @@ class PositionManager:
 
     async def _check_positions(self):
         async with AsyncSessionLocal() as db:
-            # 1. Fetch all OPEN positions
+            # 1. Fetch all OPEN positions, including user_id for per-user account settlement
             result = await db.execute(
-                text("SELECT id, symbol, side, quantity, entry_price, stop_loss, take_profit FROM positions WHERE status='OPEN'")
+                text(
+                    "SELECT id, symbol, side, quantity, entry_price, stop_loss, take_profit, user_id "
+                    "FROM positions WHERE status='OPEN'"
+                )
             )
             open_positions = result.fetchall()
 
@@ -55,6 +58,7 @@ class PositionManager:
                 entry_price = float(position[4])
                 stop_loss = float(position[5]) if position[5] else None
                 take_profit = float(position[6]) if position[6] else None
+                user_id = str(position[7]) if position[7] else None
 
                 # 2. Get latest price from Redis
                 raw_price = await self.redis.get(f"last_price:{symbol}")
@@ -95,11 +99,11 @@ class PositionManager:
 
                 # 5. Execute Trade Closure and Settle Account
                 if close_trade:
-                    await self._close_position(db, pos_id, symbol, side, quantity, entry_price, current_price, close_reason)
+                    await self._close_position(db, pos_id, symbol, side, quantity, entry_price, current_price, close_reason, user_id)
 
             await db.commit()
 
-    async def _close_position(self, db, pos_id: str, symbol: str, side: str, quantity: float, entry_price: float, exit_price: float, reason: str):
+    async def _close_position(self, db, pos_id: str, symbol: str, side: str, quantity: float, entry_price: float, exit_price: float, reason: str, user_id: str | None):
         # Calculate Realized PnL
         if side == "BUY":
             realized_pnl = (exit_price - entry_price) * quantity
@@ -109,13 +113,13 @@ class PositionManager:
         # 1. Update Position Record
         await db.execute(
             text("""
-                UPDATE positions 
-                SET status = 'CLOSED', closed_at = NOW(), close_price = :ep, realized_pnl = :rpnl 
+                UPDATE positions
+                SET status = 'CLOSED', closed_at = NOW(), close_price = :ep, realized_pnl = :rpnl
                 WHERE id = :id
             """),
             {"ep": exit_price, "rpnl": realized_pnl, "id": pos_id}
         )
-        
+
         # 2. Update Prediction Log Outcome
         outcome_str = "WIN" if realized_pnl > 0 else "LOSS"
         await db.execute(
@@ -123,28 +127,28 @@ class PositionManager:
             {"o": outcome_str, "id": pos_id}
         )
 
-        # 3. Settle Virtual Account Balance
-        await db.execute(
-            text("""
-                UPDATE virtual_accounts 
-                SET 
-                    balance = balance + :pnl,
-                    equity = equity + :pnl,
-                    peak_equity = GREATEST(peak_equity, equity + :pnl)
-                WHERE user_id = 'default'
-            """),
-            {"pnl": realized_pnl}
-        )
-        
-        # Determine strict drawdown logic
-        await db.execute(
-            text("""
-                UPDATE virtual_accounts
-                SET drawdown = CASE 
-                    WHEN peak_equity > 0 THEN (peak_equity - equity) / peak_equity
-                    ELSE 0.0 END
-                WHERE user_id = 'default'
-            """)
-        )
+        # 3. Settle the owning user's virtual account (skip if no user — orphaned position)
+        if user_id:
+            await db.execute(
+                text("""
+                    UPDATE virtual_accounts
+                    SET
+                        balance    = balance + :pnl,
+                        equity     = equity  + :pnl,
+                        peak_equity = GREATEST(peak_equity, equity + :pnl)
+                    WHERE user_id = :uid
+                """),
+                {"pnl": realized_pnl, "uid": user_id},
+            )
+            await db.execute(
+                text("""
+                    UPDATE virtual_accounts
+                    SET drawdown = CASE
+                        WHEN peak_equity > 0 THEN (peak_equity - equity) / peak_equity
+                        ELSE 0.0 END
+                    WHERE user_id = :uid
+                """),
+                {"uid": user_id},
+            )
 
-        logger.info(f"[PAPER TRADE SETTLED] {symbol} {side} Closed at {exit_price} ({reason}) | PnL: {realized_pnl:.4f}")
+        logger.info(f"[PAPER TRADE SETTLED] {symbol} {side} Closed at {exit_price} ({reason}) | PnL: {realized_pnl:.4f} | user={user_id}")

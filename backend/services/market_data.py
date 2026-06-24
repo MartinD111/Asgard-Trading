@@ -231,6 +231,12 @@ class MarketDataService:
             await self.redis.set(
                 f"candles:{symbol}", json.dumps(self.buffer.get_candles(symbol))
             )
+            # Persist completed candle to Postgres for backtester / warm-start
+            try:
+                from services.candle_store import upsert_candles
+                await upsert_candles([completed], symbol, timeframe="M5", source="live")
+            except Exception as _e:
+                logger.debug(f"candle_store persist error for {symbol}: {_e}")
 
         tick_msg = json.dumps({"type": "tick", "symbol": symbol, "price": price})
         await self.redis.publish("market:ticks", tick_msg)

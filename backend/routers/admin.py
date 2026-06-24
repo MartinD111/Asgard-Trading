@@ -29,19 +29,29 @@ async def get_all_users(db: AsyncSession = Depends(get_db), admin: dict = Depend
         users.append(dict(row._mapping))
     return users
 
-@router.post("/users")
+@router.post("/users", status_code=201)
 async def create_user(user: UserCreate, db: AsyncSession = Depends(get_db), admin: dict = Depends(get_current_admin)):
     hashed_pw = get_password_hash(user.password)
     try:
-        await db.execute(
+        result = await db.execute(
             text("""
-            INSERT INTO users (username, password_hash, is_admin, avatar_id) 
+            INSERT INTO users (username, password_hash, is_admin, avatar_id)
             VALUES (:u, :p, :a, :av)
+            RETURNING id, username, is_admin, avatar_id
             """),
             {"u": user.username, "p": hashed_pw, "a": user.is_admin, "av": user.avatar_id}
         )
+        row = result.fetchone()
+        user_id = str(row[0])
+        await db.execute(
+            text(
+                "INSERT INTO virtual_accounts (user_id, balance, equity, peak_equity) "
+                "VALUES (:uid, 100000, 100000, 100000) ON CONFLICT (user_id) DO NOTHING"
+            ),
+            {"uid": user_id},
+        )
         await db.commit()
-        return {"message": "User created successfully"}
+        return {"id": user_id, "username": row[1], "is_admin": bool(row[2]), "avatar_id": row[3]}
     except Exception as e:
         await db.rollback()
         raise HTTPException(status_code=400, detail=f"Error creating user: {str(e)}")
