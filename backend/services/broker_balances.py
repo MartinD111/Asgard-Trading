@@ -24,13 +24,18 @@ async def fetch_real_balances():
 
             async with AsyncSessionLocal() as db:
                 res = await db.execute(text("SELECT key, value FROM system_config"))
-                cfg = {row[0]: row[1] for row in res.fetchall()}
+                db_cfg = {row[0]: row[1] for row in res.fetchall()}
+
+            def get_cfg(key):
+                return db_cfg.get(key) or os.getenv(key)
 
             # Binance
-            if cfg.get('BINANCE_API_KEY') and cfg.get('BINANCE_SECRET_KEY'):
+            binance_key = get_cfg('BINANCE_API_KEY')
+            binance_sec = get_cfg('BINANCE_SECRET_KEY')
+            if binance_key and binance_sec:
                 try:
                     from binance.client import AsyncClient
-                    client = await AsyncClient.create(cfg['BINANCE_API_KEY'], cfg['BINANCE_SECRET_KEY'])
+                    client = await AsyncClient.create(binance_key, binance_sec)
                     account = await client.get_account()
                     # Try to sum USDT and USDC in wallet
                     usdt = next((float(b['free']) + float(b['locked']) for b in account['balances'] if b['asset'] == 'USDT'), 0.0)
@@ -43,10 +48,12 @@ async def fetch_real_balances():
                     logger.warning(f"Failed to fetch Binance balance: {e}")
 
             # Alpaca
-            if cfg.get('ALPACA_API_KEY') and cfg.get('ALPACA_SECRET_KEY'):
+            alpaca_key = get_cfg('ALPACA_API_KEY')
+            alpaca_sec = get_cfg('ALPACA_SECRET_KEY')
+            if alpaca_key and alpaca_sec:
                 try:
                     from alpaca.trading.client import TradingClient
-                    client = TradingClient(cfg['ALPACA_API_KEY'], cfg['ALPACA_SECRET_KEY'], paper=False)
+                    client = TradingClient(alpaca_key, alpaca_sec, paper=False)
                     acc = client.get_account()
                     alpaca_bal = float(acc.equity)
                     has_any_keys = True
@@ -54,17 +61,20 @@ async def fetch_real_balances():
                     logger.warning(f"Failed to fetch Alpaca balance: {e}")
 
             # OANDA
-            if cfg.get('OANDA_API_KEY') and cfg.get('OANDA_ACCOUNT_ID'):
+            oanda_key = get_cfg('OANDA_API_KEY')
+            oanda_acc = get_cfg('OANDA_ACCOUNT_ID')
+            if oanda_key and oanda_acc:
                 try:
                     import oandapyV20
                     import oandapyV20.endpoints.accounts as accounts
-                    client = oandapyV20.API(access_token=cfg['OANDA_API_KEY'])
-                    r = accounts.AccountSummary(cfg['OANDA_ACCOUNT_ID'])
+                    client = oandapyV20.API(access_token=oanda_key)
+                    r = accounts.AccountSummary(oanda_acc)
                     client.request(r)
                     oanda_bal = float(r.response.get('account', {}).get('NAV', 0.0))
                     has_any_keys = True
                 except Exception as e:
                     logger.warning(f"Failed to fetch OANDA balance: {e}")
+
 
             if has_any_keys:
                 total_real = binance_bal + alpaca_bal + oanda_bal

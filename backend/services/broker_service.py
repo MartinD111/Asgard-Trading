@@ -128,9 +128,36 @@ async def get_decrypted_keys(
     )
     row = result.fetchone()
     if not row:
+        from routers.config import _get_cfg
+
+        def is_configured(val):
+            return bool(val) and val.strip() != ""
+
+        if broker.lower() == "oanda":
+            oanda_key = (await _get_cfg(db, "OANDA_API_KEY")) or os.getenv("OANDA_API_KEY", "")
+            oanda_acc = (await _get_cfg(db, "OANDA_ACCOUNT_ID")) or os.getenv("OANDA_ACCOUNT_ID", "")
+            oanda_env = (await _get_cfg(db, "OANDA_ENVIRONMENT")) or os.getenv("OANDA_ENVIRONMENT", "practice")
+
+            if is_configured(oanda_key) and oanda_env.lower() == environment.lower():
+                return {
+                    "api_key": oanda_key,
+                    "api_secret": None,
+                    "account_id": oanda_acc if is_configured(oanda_acc) else None,
+                }
+        elif broker.lower() == "binance":
+            binance_key = (await _get_cfg(db, "BINANCE_API_KEY")) or os.getenv("BINANCE_API_KEY", "")
+            binance_sec = (await _get_cfg(db, "BINANCE_SECRET_KEY")) or os.getenv("BINANCE_SECRET_KEY", "")
+
+            if is_configured(binance_key) and is_configured(binance_sec):
+                return {
+                    "api_key": binance_key,
+                    "api_secret": binance_sec,
+                    "account_id": None,
+                }
         return None
     return {
         "api_key":    decrypt_secret(bytes(row[0])),
         "api_secret": decrypt_secret(bytes(row[1])) if row[1] else None,
         "account_id": row[2],
     }
+

@@ -18,7 +18,7 @@ from services.gemini_predictor import GeminiPredictor
 from services.optimizer_core import DEFAULT_WEIGHTS
 from services.risk_manager import RiskManager
 from services.news_monitor import NewsMonitor
-from services.signals import compute_signal
+from services.signals import compute_signal, SELECTABLE_AGENTS, DEFAULT_AGENT as _DEFAULT_AGENT
 from brokers.router import get_broker_for_user
 
 logger = logging.getLogger(__name__)
@@ -35,8 +35,10 @@ CONFIDENCE_THRESHOLD = float(os.getenv("CONFIDENCE_THRESHOLD", "0.70"))
 # the engine evaluates frequently and executes whenever a signal qualifies.
 EVAL_INTERVAL = int(os.getenv("EVAL_INTERVAL", "60"))
 
-# The three selectable agents (one is active at a time, the rest run as what-if).
-AGENTS = ["loki", "thor", "odin"]
+# Selectable agents (one is active at a time, the rest run as what-if).
+# Loki is split into three single-pillar variants: Math / Patterns / Trends.
+AGENTS = list(SELECTABLE_AGENTS)
+DEFAULT_AGENT = _DEFAULT_AGENT
 
 ALL_SYMBOLS = ["EUR_USD", "XAU_USD", "XAG_USD", "BTCUSDT"]
 
@@ -115,9 +117,9 @@ class DecisionEngine:
 
         # Which agent is live? The others are evaluated as what-if for comparison.
         raw_agent = await self.redis.get("config:active_agent")
-        active_agent = (raw_agent or b"loki").decode()
+        active_agent = (raw_agent or DEFAULT_AGENT.encode()).decode()
         if active_agent not in AGENTS:
-            active_agent = "loki"
+            active_agent = DEFAULT_AGENT
 
         for symbol in ALL_SYMBOLS:
             await self._analyse_symbol(
@@ -207,12 +209,10 @@ class DecisionEngine:
                 agent=strategy,
             )
 
-            # Thor includes a cross-asset correlation factor (25% weight).
-            # blend: 75% from compute_signal, 25% from correlation.
-            if strategy == "thor":
-                final_score = max(-1.0, min(1.0, signal.final_score * 0.75 + correlation_contribution * 0.25))
-            else:
-                final_score = signal.final_score
+            # Thor is a clean equal blend of the three pillars (computed in
+            # compute_signal). Correlation is still logged for analytics but no
+            # longer overrides the score.
+            final_score = signal.final_score
 
             if not is_what_if:
                 self._symbol_scores[symbol] = final_score
@@ -232,24 +232,25 @@ class DecisionEngine:
                 final_score, strategy, is_what_if,
             )
 
-            # 8. Push to WebSocket & Execute Trade (Only for active strategy)
-            if not is_what_if:
-                payload = {
-                    "type": "prediction",
-                    "symbol": symbol,
-                    "probability_up": prediction.probability_up,
-                    "probability_down": prediction.probability_down,
-                    "confidence_score": prediction.confidence_score,
-                    "gemini_prob": prediction.gemini_prob,
-                    "final_score": final_score,
-                    "direction": direction,
-                    "reasoning": prediction.reasoning,
-                    "expected_volatility": prediction.expected_volatility,
-                    "timestamp": datetime.now(timezone.utc).isoformat(),
-                    "detected_pattern": signal.pattern_name,
-                }
-                await self.ws_manager.broadcast(json.dumps(payload), channel=self.ws_channel)
+            # 8. Push to WebSocket & Execute Trade
+            payload = {
+                "type": "prediction",
+                "symbol": symbol,
+                "agent": strategy,
+                "probability_up": prediction.probability_up,
+                "probability_down": prediction.probability_down,
+                "confidence_score": prediction.confidence_score,
+                "gemini_prob": prediction.gemini_prob,
+                "final_score": final_score,
+                "direction": direction,
+                "reasoning": prediction.reasoning,
+                "expected_volatility": prediction.expected_volatility,
+                "timestamp": datetime.now(timezone.utc).isoformat(),
+                "detected_pattern": signal.pattern_name,
+            }
+            await self.ws_manager.broadcast(json.dumps(payload), channel=self.ws_channel)
 
+            if not is_what_if:
                 score_msg = {
                     "type": "AGENT_SCORE",
                     "payload": {
@@ -275,10 +276,10 @@ class DecisionEngine:
                         symbol, direction, prediction, final_score, log_id, global_risk
                     )
 
-                logger.info(
-                    f"[{symbol}] ({strategy}) final={final_score:.3f} gemini={prediction.gemini_prob:.3f} "
-                    f"tech={signal.technical_score:.3f} conf={signal.confidence:.3f} macro_risk={global_risk:.2f}"
-                )
+            logger.info(
+                f"[{symbol}] ({strategy}) final={final_score:.3f} gemini={prediction.gemini_prob:.3f} "
+                f"tech={signal.technical_score:.3f} conf={signal.confidence:.3f} macro_risk={global_risk:.2f}"
+            )
 
     async def _log_prediction(
         self, symbol, prediction, tech_score, pat_score, corr_score, final_score, agent_used, is_what_if

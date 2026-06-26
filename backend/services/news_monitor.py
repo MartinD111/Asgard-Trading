@@ -107,14 +107,35 @@ class NewsMonitor:
             return []
 
     async def run_loop(self, interval: int = 60):
-        """Async loop — fetches every `interval` seconds."""
+        """
+        Async loop — fetches every `interval` seconds. The interval is re-read
+        from system_config (`news_scan_interval_seconds`) each cycle so admins
+        can throttle news/API activity live without a restart.
+        """
         while True:
             try:
                 articles = self.fetch_news()
                 self.store_articles(articles)
             except Exception as e:
                 logger.error(f"NewsMonitor loop error: {e}")
+            interval = await self._current_interval(interval)
             await asyncio.sleep(interval)
+
+    async def _current_interval(self, fallback: int) -> int:
+        """Read the configurable scan interval from system_config."""
+        try:
+            from db.database import AsyncSessionLocal
+            from sqlalchemy import text
+            async with AsyncSessionLocal() as db:
+                res = await db.execute(
+                    text("SELECT value FROM system_config WHERE key='news_scan_interval_seconds'")
+                )
+                row = res.fetchone()
+                if row and row[0] not in (None, ""):
+                    return max(10, int(float(row[0])))
+        except Exception as e:
+            logger.warning(f"NewsMonitor interval lookup failed: {e}")
+        return fallback
 
 
 # ─── Standalone entrypoint (docker news-monitor service) ──────

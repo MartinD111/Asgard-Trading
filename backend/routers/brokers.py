@@ -87,14 +87,58 @@ async def get_broker_connections(
     current_user: dict = Depends(get_current_user),
     db: AsyncSession = Depends(get_db),
 ):
+    import os
+    from routers.config import _get_cfg
+
     connections = await list_broker_connections(db, str(current_user["id"]))
-    # Stringify UUIDs and datetimes for JSON serialisation
-    return [
+
+    has_oanda = any(c["broker"] == "oanda" for c in connections)
+    has_binance = any(c["broker"] == "binance" for c in connections)
+
+    oanda_key = (await _get_cfg(db, "OANDA_API_KEY")) or os.getenv("OANDA_API_KEY", "")
+    binance_key = (await _get_cfg(db, "BINANCE_API_KEY")) or os.getenv("BINANCE_API_KEY", "")
+
+    injected_connections = []
+
+    def is_configured(val):
+        return bool(val) and val.strip() != ""
+
+    if not has_oanda and is_configured(oanda_key):
+        oanda_acc = (await _get_cfg(db, "OANDA_ACCOUNT_ID")) or os.getenv("OANDA_ACCOUNT_ID", "")
+        oanda_env = (await _get_cfg(db, "OANDA_ENVIRONMENT")) or os.getenv("OANDA_ENVIRONMENT", "practice")
+        injected_connections.append({
+            "id": "env-oanda",
+            "broker": "oanda",
+            "environment": oanda_env,
+            "account_id": oanda_acc if is_configured(oanda_acc) else "ENV",
+            "is_active": True,
+            "created_at": None,
+            "updated_at": None
+        })
+
+    if not has_binance and is_configured(binance_key):
+        injected_connections.append({
+            "id": "env-binance",
+            "broker": "binance",
+            "environment": "live",
+            "account_id": "ENV",
+            "is_active": True,
+            "created_at": None,
+            "updated_at": None
+        })
+
+    all_connections = [
         {**c, "id": str(c["id"]),
          "created_at": c["created_at"].isoformat() if c["created_at"] else None,
          "updated_at": c["updated_at"].isoformat() if c["updated_at"] else None}
         for c in connections
     ]
+
+    for ic in injected_connections:
+        all_connections.append(ic)
+
+    return all_connections
+
 
 
 @router.delete("/{connection_id}", status_code=status.HTTP_204_NO_CONTENT)

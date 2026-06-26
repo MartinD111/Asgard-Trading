@@ -3,16 +3,64 @@ import json
 import logging
 import asyncio
 import time
+from datetime import datetime, timezone
 from dataclasses import dataclass
 from typing import Any
 
 import google.generativeai as genai
+import redis.asyncio as aioredis
 from sqlalchemy import text
 
 # Import db session securely
 from db.database import AsyncSessionLocal
 
 logger = logging.getLogger(__name__)
+
+# Defaults; overridable per-deployment via system_config (admin Settings UI).
+DEFAULT_GEMINI_MIN_INTERVAL = 58.0   # seconds between real API calls (1500/day)
+DEFAULT_GEMINI_DAILY_CAP = 1500      # hard ceiling on real calls per UTC day
+
+
+def _usage_key(day: str | None = None) -> str:
+    day = day or datetime.now(timezone.utc).strftime("%Y-%m-%d")
+    return f"gemini:calls:{day}"
+
+
+# Lazily-created shared Redis client for the usage counter.
+_redis_client: aioredis.Redis | None = None
+
+
+def _get_redis() -> aioredis.Redis:
+    global _redis_client
+    if _redis_client is None:
+        _redis_client = aioredis.from_url(os.getenv("REDIS_URL", "redis://redis:6379"))
+    return _redis_client
+
+
+async def get_gemini_usage() -> dict:
+    """Return today's call count plus the configured cap and intervals."""
+    redis = _get_redis()
+    raw = await redis.get(_usage_key())
+    calls_today = int(raw) if raw else 0
+    async with AsyncSessionLocal() as db:
+        cap = await _get_int_cfg(db, "gemini_daily_cap", DEFAULT_GEMINI_DAILY_CAP)
+        min_interval = await _get_int_cfg(db, "gemini_min_interval_seconds", int(DEFAULT_GEMINI_MIN_INTERVAL))
+        news_interval = await _get_int_cfg(db, "news_scan_interval_seconds", 60)
+    return {
+        "calls_today": calls_today,
+        "cap": cap,
+        "min_interval": min_interval,
+        "news_interval": news_interval,
+    }
+
+
+async def _get_int_cfg(db, key: str, default: int) -> int:
+    res = await db.execute(text("SELECT value FROM system_config WHERE key=:k"), {"k": key})
+    row = res.fetchone()
+    try:
+        return int(float(row[0])) if row and row[0] not in (None, "") else default
+    except (ValueError, TypeError):
+        return default
 
 # Global rate limiter to ensure we do not exceed 1500 requests per 24 hours.
 # 24 hours = 86400 seconds. 86400 / 1500 = 57.6 seconds per request.
@@ -122,15 +170,23 @@ Analyse this context and return your probability assessment JSON."""
                 logger.debug(f"[{symbol}] Gemini cache hit (age {time.time()-ts:.0f}s)")
                 return prediction
 
-        # Fetch API key dynamically from DB
+        # Fetch API key + usage limits dynamically from DB
         api_key = ""
+        daily_cap = DEFAULT_GEMINI_DAILY_CAP
+        min_interval = DEFAULT_GEMINI_MIN_INTERVAL
         async with AsyncSessionLocal() as db:
             res = await db.execute(text("SELECT value FROM system_config WHERE key='GEMINI_API_KEY'"))
             row = res.fetchone()
             if row:
                 api_key = row[0]
+            daily_cap = await _get_int_cfg(db, "gemini_daily_cap", DEFAULT_GEMINI_DAILY_CAP)
+            min_interval = float(await _get_int_cfg(db, "gemini_min_interval_seconds", int(DEFAULT_GEMINI_MIN_INTERVAL)))
 
         if not api_key:
+            api_key = os.getenv("GEMINI_API_KEY", "")
+
+        if not api_key:
+
             return GeminiPrediction(
                 probability_up=0.5,
                 probability_down=0.5,
@@ -147,18 +203,43 @@ Analyse this context and return your probability assessment JSON."""
             system_instruction=SYSTEM_PROMPT,
         )
 
+        # Enforce the daily cap: once exhausted, return a neutral fallback rather
+        # than spending another call. Resets automatically at UTC midnight.
+        redis = _get_redis()
+        usage_key = _usage_key()
+        raw_calls = await redis.get(usage_key)
+        calls_today = int(raw_calls) if raw_calls else 0
+        if calls_today >= daily_cap:
+            logger.warning(f"[{symbol}] Gemini daily cap ({daily_cap}) reached — skipping API call.")
+            return GeminiPrediction(
+                probability_up=0.5,
+                probability_down=0.5,
+                confidence_score=0.0,
+                expected_volatility=1.0,
+                reasoning=f"Gemini daily call cap ({daily_cap}) reached. AI analysis paused until UTC midnight.",
+                gemini_prob=0.0,
+            )
+
         context = self._build_context(symbol, candles, news_items or [], macro)
-        
+
         try:
-            # Enforce strict 58s global rate limit to spread queries exactly over 24h
-            logger.info(f"[{symbol}] GeminiPredictor v čakalni vrsti za RateLimit (max 1500/dan, 1 na 58s)...")
+            # Enforce the configurable global rate limit to spread queries over the day.
+            global_gemini_limiter.interval = min_interval
+            logger.info(f"[{symbol}] GeminiPredictor queued for RateLimit (cap {daily_cap}/day, 1 per {min_interval:.0f}s)...")
             await global_gemini_limiter.wait()
-            logger.info(f"[{symbol}] GeminiPredictor začenja API klic...")
+            logger.info(f"[{symbol}] GeminiPredictor starting API call...")
 
             response = await model.generate_content_async(
                 context,
                 generation_config=self.generation_config,
             )
+            # Count this real API call against today's quota (expire after 48h).
+            try:
+                new_count = await redis.incr(usage_key)
+                if new_count == 1:
+                    await redis.expire(usage_key, 172800)
+            except Exception as ce:
+                logger.error(f"Gemini usage counter error: {ce}")
             data: dict[str, Any] = json.loads(response.text)
 
             prob_up = float(data.get("probability_up", 0.5))

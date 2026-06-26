@@ -136,7 +136,7 @@ async def prediction_logs(
         result = await db.execute(
             text(
                 "SELECT * FROM prediction_logs "
-                "WHERE user_id=:uid AND symbol=:s ORDER BY timestamp DESC LIMIT :l"
+                "WHERE (user_id IS NULL OR user_id=:uid) AND symbol=:s ORDER BY timestamp DESC LIMIT :l"
             ),
             {"uid": uid, "s": symbol, "l": limit},
         )
@@ -144,7 +144,7 @@ async def prediction_logs(
         result = await db.execute(
             text(
                 "SELECT * FROM prediction_logs "
-                "WHERE user_id=:uid ORDER BY timestamp DESC LIMIT :l"
+                "WHERE (user_id IS NULL OR user_id=:uid) ORDER BY timestamp DESC LIMIT :l"
             ),
             {"uid": uid, "l": limit},
         )

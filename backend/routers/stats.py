@@ -4,10 +4,11 @@ from datetime import datetime, timedelta, timezone
 from typing import Optional
 
 from fastapi import APIRouter, Depends, Query, HTTPException, Request
-from sqlalchemy import text
+from sqlalchemy import text, bindparam
 from sqlalchemy.ext.asyncio import AsyncSession
 from db.database import get_db
 from routers.auth import get_current_user
+from services.signals import SELECTABLE_AGENTS
 
 router = APIRouter()
 
@@ -47,7 +48,7 @@ async def get_history(
     """
     params = {"limit": limit}
 
-    if agent in ("loki", "thor", "odin"):
+    if agent in SELECTABLE_AGENTS:
         query += " AND pl.agent_used = :agent"
         params["agent"] = agent
 
@@ -80,8 +81,8 @@ async def get_what_if_stats(
     symbol: str = Query("BTCUSDT", description="Trading asset symbol, e.g., BTCUSDT, ETHUSDT"),
     db: AsyncSession = Depends(get_db)
 ):
-    # All three agents are evaluated every cycle; compare them side by side.
-    tf_agents = ["loki", "thor", "odin"]
+    # All agents are evaluated every cycle; compare them side by side.
+    tf_agents = list(SELECTABLE_AGENTS)
 
     output = {
         "price_history": [],
@@ -206,14 +207,14 @@ async def get_daily_contribution(
         FROM prediction_logs pl
         JOIN positions p ON pl.position_id = p.id
         WHERE p.status = 'CLOSED'
-          AND pl.agent_used IN ('loki', 'thor', 'odin')
+          AND pl.agent_used IN :agents
           AND DATE(p.closed_at) = :today
         GROUP BY pl.agent_used
-    """)
-    result = await db.execute(query, {"today": today})
+    """).bindparams(bindparam("agents", expanding=True))
+    result = await db.execute(query, {"today": today, "agents": list(SELECTABLE_AGENTS)})
     rows = result.fetchall()
 
-    agents = {"loki": 0.0, "thor": 0.0, "odin": 0.0}
+    agents = {a: 0.0 for a in SELECTABLE_AGENTS}
     total_pnl = 0.0
 
     for r in rows:

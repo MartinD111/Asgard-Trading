@@ -68,13 +68,27 @@ async def broadcast_portfolio_loop(ws_man):
                     balance = float(user_row[1])
                     equity = float(user_row[2])
 
-                    pos_res = await db.execute(
-                        text(
-                            "SELECT symbol, side, quantity, entry_price, current_price "
-                            "FROM positions WHERE status='OPEN' AND user_id = :uid"
-                        ),
-                        {"uid": uid},
-                    )
+                    if uid == "default":
+                        pos_res = await db.execute(
+                            text(
+                                "SELECT symbol, side, quantity, entry_price, current_price "
+                                "FROM positions WHERE status='OPEN' AND user_id IS NULL"
+                            )
+                        )
+                    else:
+                        try:
+                            from uuid import UUID
+                            UUID(uid)
+                            pos_res = await db.execute(
+                                text(
+                                    "SELECT symbol, side, quantity, entry_price, current_price "
+                                    "FROM positions WHERE status='OPEN' AND user_id = :uid"
+                                ),
+                                {"uid": uid},
+                            )
+                        except ValueError:
+                            # Skip if not a valid UUID format
+                            continue
                     positions = [
                         {
                             "symbol": p[0],
@@ -274,6 +288,31 @@ app.include_router(admin.router)
 app.include_router(brokers.router)
 app.include_router(backtest.router)
 app.include_router(ws_router)
+
+
+from fastapi.staticfiles import StaticFiles
+from fastapi.responses import HTMLResponse
+
+# Serve the static design dashboard assets
+app.mount("/static", StaticFiles(directory=os.path.join(os.path.dirname(__file__), "static")), name="static")
+
+@app.get("/", response_class=HTMLResponse)
+async def get_dashboard():
+    index_path = os.path.join(os.path.dirname(__file__), "static", "index.html")
+    if not os.path.exists(index_path):
+        return HTMLResponse("<h3>Dashboard index.html not found. Please run setup.</h3>", status_code=404)
+    with open(index_path, "r", encoding="utf-8") as f:
+        html_content = f.read()
+    return html_content
+
+@app.get("/simulator", response_class=HTMLResponse)
+async def get_simulator():
+    sim_path = os.path.join(os.path.dirname(__file__), "static", "simulator.html")
+    if not os.path.exists(sim_path):
+        return HTMLResponse("<h3>Simulator not found.</h3>", status_code=404)
+    with open(sim_path, "r", encoding="utf-8") as f:
+        return f.read()
+
 
 
 @app.get("/health")

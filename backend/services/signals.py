@@ -29,12 +29,26 @@ class Signal:
     weights: dict = field(default_factory=dict)
 
 
-# Default agent weight presets (same as before, now centralised here)
+# Agent weight presets. Pillars map to the user's mental model:
+#   Math (M)     -> tech     (RSI/MACD/momentum/ATR composite)
+#   Patterns (P) -> pattern  (chart pattern recognizer)
+#   Trends (T)   -> gemini   (Gemini AI directional probability)
+#
+# Loki is a SINGLE-pillar agent: choose one of M / P / T.
+# Thor combines all three equally (sum / 3).
+# Odin starts equal and is continuously re-weighted by the optimizer.
 AGENT_WEIGHTS: dict[str, dict[str, float]] = {
-    "loki": {"tech": 0.40, "gemini": 0.30, "pattern": 0.30},
-    "thor": {"tech": 0.25, "gemini": 0.25, "pattern": 0.25, "corr": 0.25},
-    "odin": {"tech": 0.33, "gemini": 0.34, "pattern": 0.33},  # overridden by optimizer
+    "loki_m": {"tech": 1.0, "gemini": 0.0, "pattern": 0.0},   # Math only
+    "loki_p": {"tech": 0.0, "gemini": 0.0, "pattern": 1.0},   # Patterns only
+    "loki_t": {"tech": 0.0, "gemini": 1.0, "pattern": 0.0},   # Trends (Gemini) only
+    "thor":   {"tech": 1 / 3, "gemini": 1 / 3, "pattern": 1 / 3},  # equal blend
+    "odin":   {"tech": 0.33, "gemini": 0.34, "pattern": 0.33},     # optimizer-overridden
+    "loki":   {"tech": 0.40, "gemini": 0.30, "pattern": 0.30},     # legacy fallback
 }
+
+# Canonical, user-selectable agents (one active at a time; the rest run what-if).
+SELECTABLE_AGENTS: tuple[str, ...] = ("loki_m", "loki_p", "loki_t", "thor", "odin")
+DEFAULT_AGENT = "loki_m"
 
 
 def compute_signal(

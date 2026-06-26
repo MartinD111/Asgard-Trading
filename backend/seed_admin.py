@@ -20,12 +20,11 @@ async def _seed() -> None:
         logger.error("[seed_admin] ADMIN_PASSWORD is still the placeholder — aborting startup.")
         sys.exit(1)
 
-    from passlib.context import CryptContext
+    import bcrypt
     from sqlalchemy import text
     from db.database import AsyncSessionLocal
 
-    pwd_ctx = CryptContext(schemes=["bcrypt"], deprecated="auto")
-    hashed = pwd_ctx.hash(password)
+    hashed = bcrypt.hashpw(password.encode("utf-8"), bcrypt.gensalt()).decode("utf-8")
 
     async with AsyncSessionLocal() as session:
         result = await session.execute(

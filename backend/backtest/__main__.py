@@ -34,7 +34,8 @@ def _parse_args() -> argparse.Namespace:
     p = argparse.ArgumentParser(description="Asgard Trading Backtester")
     p.add_argument("--symbol",    default="XAU_USD")
     p.add_argument("--days",      type=int,   default=90)
-    p.add_argument("--agent",     default="loki", choices=["loki", "thor", "odin"])
+    p.add_argument("--agent",     default="loki_m",
+                   choices=["loki_m", "loki_p", "loki_t", "thor", "odin"])
     p.add_argument("--capital",   type=float, default=10_000.0)
     p.add_argument("--threshold", type=float, default=0.35)
     p.add_argument("--confidence",type=float, default=0.40)

@@ -159,10 +159,20 @@ async def set_live_mode(
         )
         count = res.scalar() or 0
         if count == 0:
-            raise HTTPException(
-                status_code=400,
-                detail="No active broker connection found. Add a broker connection before enabling live mode.",
-            )
+            import os
+            from routers.config import _get_cfg
+            oanda_key = (await _get_cfg(db, "OANDA_API_KEY")) or os.getenv("OANDA_API_KEY", "")
+            binance_key = (await _get_cfg(db, "BINANCE_API_KEY")) or os.getenv("BINANCE_API_KEY", "")
+
+            def is_configured(val):
+                return bool(val) and val.strip() != ""
+
+            if not (is_configured(oanda_key) or is_configured(binance_key)):
+                raise HTTPException(
+                    status_code=400,
+                    detail="No active broker connection found. Add a broker connection before enabling live mode.",
+                )
+
 
     new_state = not current
     await redis.set(f"user:{uid}:live_mode", "true" if new_state else "false")

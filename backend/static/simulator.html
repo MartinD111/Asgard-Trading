@@ -1,0 +1,903 @@
+<!DOCTYPE html>
+<html lang="en">
+<head>
+<meta charset="UTF-8">
+<meta name="viewport" content="width=device-width, initial-scale=1.0">
+<title>Asgard | Simulator</title>
+<link href="https://fonts.googleapis.com/css2?family=Outfit:wght@400;500;600;700;800&family=JetBrains+Mono:wght@400;500;600&display=swap" rel="stylesheet">
+<style>
+:root{
+  --bg:#080C14;--s1:#0D1421;--s2:#131B2B;--s3:#1A2338;
+  --bd:rgba(255,255,255,0.07);--bd-h:rgba(255,255,255,0.13);
+  --t1:#E8ECF4;--t2:#8091A8;--t3:#445060;
+  --gold:#F0A500;--gold-bg:rgba(240,165,0,0.08);--gold-bd:rgba(240,165,0,0.22);
+  --blue:#4B9DFF;--blue-bg:rgba(75,157,255,0.09);--blue-bd:rgba(75,157,255,0.25);
+  --pu:#9B72FF;--pu-bg:rgba(155,114,255,0.09);--pu-bd:rgba(155,114,255,0.25);
+  --gr:#22C55E;--gr-bg:rgba(34,197,94,0.1);--gr-bd:rgba(34,197,94,0.25);
+  --re:#F43F5E;--re-bg:rgba(244,63,94,0.1);--re-bd:rgba(244,63,94,0.25);
+  --r:12px;--rs:7px;--rp:999px;
+}
+*{margin:0;padding:0;box-sizing:border-box;}
+body{font-family:'Outfit',system-ui,sans-serif;background:var(--bg);color:var(--t1);height:100vh;overflow:hidden;display:flex;flex-direction:column;}
+.mono{font-family:'JetBrains Mono',monospace;}
+
+/* HEADER */
+.hdr{height:58px;display:flex;align-items:center;justify-content:space-between;padding:0 18px;background:var(--s1);border-bottom:1px solid var(--bd);gap:14px;flex-shrink:0;}
+.brand{display:flex;align-items:center;gap:9px;text-decoration:none;}
+.brand-name{font-size:15px;font-weight:800;color:var(--gold);letter-spacing:.1em;text-transform:uppercase;line-height:1.1;}
+.brand-sub{font-size:8px;font-weight:600;color:var(--t3);letter-spacing:.2em;text-transform:uppercase;}
+.sim-badge{background:var(--gold-bg);border:1px solid var(--gold-bd);color:var(--gold);font-size:9px;font-weight:700;text-transform:uppercase;letter-spacing:.08em;padding:3px 10px;border-radius:var(--rp);}
+.hdr-mid{display:flex;align-items:center;gap:10px;}
+.hdr-r{display:flex;align-items:center;gap:10px;}
+@keyframes blink{0%,100%{opacity:1}50%{opacity:.4}}
+.back-btn{display:flex;align-items:center;gap:5px;padding:6px 13px;border-radius:var(--rp);font-size:12px;font-weight:600;color:var(--t2);background:var(--s2);border:1px solid var(--bd);cursor:pointer;transition:all .18s;text-decoration:none;}
+.back-btn:hover{color:var(--t1);border-color:var(--bd-h);}
+.run-ctrl{display:flex;align-items:center;gap:6px;}
+.run-btn{padding:6px 16px;border-radius:var(--rp);font-size:12px;font-weight:700;text-transform:uppercase;letter-spacing:.06em;border:none;cursor:pointer;transition:all .18s;}
+.run-btn.start{background:var(--gr);color:#fff;}
+.run-btn.start:hover{box-shadow:0 3px 12px rgba(34,197,94,.4);}
+.run-btn.pause{background:var(--gold);color:#000;}
+.run-btn.pause:hover{box-shadow:0 3px 12px rgba(240,165,0,.4);}
+.run-btn.ghost{background:var(--s2);color:var(--t2);border:1px solid var(--bd);}
+.run-btn.ghost:hover{color:var(--t1);border-color:var(--bd-h);}
+.hdiv{width:1px;height:26px;background:var(--bd);}
+.ws-row{display:flex;align-items:center;gap:5px;}
+.ws-dot{width:6px;height:6px;border-radius:50%;flex-shrink:0;}
+.ws-lbl{font-size:10px;font-weight:600;color:var(--t2);text-transform:uppercase;letter-spacing:.05em;}
+
+/* TOP STATS */
+.top-stats{display:grid;grid-template-columns:repeat(6,1fr);gap:9px;padding:12px 16px 0;flex-shrink:0;}
+.stat-card{background:var(--s1);border:1px solid var(--bd);border-radius:var(--r);padding:11px 14px;}
+.stat-label{font-size:8.5px;font-weight:700;color:var(--t3);text-transform:uppercase;letter-spacing:.07em;margin-bottom:5px;}
+.stat-val{font-family:'JetBrains Mono',monospace;font-size:15px;font-weight:600;color:var(--t1);}
+.stat-val.g{color:var(--gr);}
+.stat-val.r{color:var(--re);}
+.stat-val.gold{color:var(--gold);}
+.stat-sub{font-size:9px;color:var(--t3);margin-top:2px;}
+
+/* BODY GRID */
+.body-grid{flex:1;display:grid;grid-template-columns:1fr 340px;grid-template-rows:1fr 200px;gap:9px;padding:9px 16px 12px;overflow:hidden;min-height:0;}
+
+/* CHART */
+.chart-panel{grid-row:1;grid-column:1;background:var(--s1);border:1px solid var(--bd);border-radius:var(--r);display:flex;flex-direction:column;overflow:hidden;}
+.panel-hdr{display:flex;align-items:center;justify-content:space-between;padding:11px 14px 8px;flex-shrink:0;}
+.panel-title{font-size:10.5px;font-weight:700;color:var(--t2);text-transform:uppercase;letter-spacing:.07em;display:flex;align-items:center;gap:7px;}
+.panel-ic{display:flex;align-items:center;justify-content:center;width:22px;height:22px;border-radius:6px;}
+.panel-ic svg{width:11px;height:11px;}
+.chart-tabs{display:flex;gap:4px;}
+.ctab{padding:4px 10px;border-radius:var(--rp);font-size:10px;font-weight:600;color:var(--t2);background:none;border:1px solid transparent;cursor:pointer;transition:all .15s;}
+.ctab:hover{color:var(--t1);}
+.ctab.on{background:var(--s2);border-color:var(--bd);color:var(--t1);}
+#sim-canvas{flex:1;width:100%;display:block;}
+
+/* ACTIVITY */
+.activity-panel{grid-row:2;grid-column:1;background:var(--s1);border:1px solid var(--bd);border-radius:var(--r);display:flex;flex-direction:column;overflow:hidden;}
+.act-log{flex:1;overflow-y:auto;padding:0 14px 10px;scrollbar-width:thin;scrollbar-color:var(--s3) transparent;}
+.act-log::-webkit-scrollbar{width:3px;}
+.act-log::-webkit-scrollbar-thumb{background:var(--s3);}
+.act-row{display:flex;align-items:center;gap:8px;padding:5px 0;border-bottom:1px solid var(--bd);font-size:11px;}
+.act-row:last-child{border-bottom:none;}
+.act-time{font-family:'JetBrains Mono',monospace;font-size:9.5px;color:var(--t3);min-width:50px;}
+.act-agent{font-size:9px;font-weight:700;padding:2px 7px;border-radius:var(--rp);text-transform:uppercase;}
+.act-dir{font-size:9px;font-weight:700;padding:2px 7px;border-radius:var(--rp);text-transform:uppercase;min-width:36px;text-align:center;}
+.act-dir.buy{background:var(--gr-bg);color:var(--gr);border:1px solid var(--gr-bd);}
+.act-dir.sell{background:var(--re-bg);color:var(--re);border:1px solid var(--re-bd);}
+.act-dir.close{background:var(--s3);color:var(--t2);border:1px solid var(--bd);}
+.act-sym{font-weight:600;color:var(--t1);min-width:72px;}
+.act-note{font-size:10px;color:var(--t3);flex:1;}
+.act-pnl{font-family:'JetBrains Mono',monospace;font-size:11px;font-weight:600;margin-left:auto;}
+.act-pnl.g{color:var(--gr);}
+.act-pnl.r{color:var(--re);}
+.act-pnl.n{color:var(--t3);}
+.empty-log{display:flex;align-items:center;justify-content:center;height:60px;font-size:11px;color:var(--t3);}
+
+/* RIGHT COL */
+.right-col{grid-row:1/3;grid-column:2;display:flex;flex-direction:column;gap:9px;overflow-y:auto;scrollbar-width:thin;scrollbar-color:var(--s3) transparent;}
+.right-col::-webkit-scrollbar{width:3px;}
+.right-col::-webkit-scrollbar-thumb{background:var(--s3);}
+.agent-card{background:var(--s1);border:1px solid var(--bd);border-radius:var(--r);padding:13px 14px;flex-shrink:0;}
+.ac-hdr{display:flex;align-items:center;justify-content:space-between;margin-bottom:10px;}
+.ac-name{font-size:13px;font-weight:700;}
+.ac-role{font-size:9px;font-weight:600;padding:2px 8px;border-radius:var(--rp);text-transform:uppercase;letter-spacing:.05em;}
+.ac-stats{display:grid;grid-template-columns:1fr 1fr;gap:6px;}
+.ac-stat{background:var(--s2);border-radius:var(--rs);padding:8px 10px;}
+.ac-stat-label{font-size:8px;font-weight:700;color:var(--t3);text-transform:uppercase;letter-spacing:.06em;margin-bottom:3px;}
+.ac-stat-val{font-family:'JetBrains Mono',monospace;font-size:12px;font-weight:600;}
+.win-bar-wrap{margin-top:9px;}
+.win-bar-label{display:flex;justify-content:space-between;font-size:9px;color:var(--t3);margin-bottom:4px;}
+.win-bar{height:5px;background:var(--s3);border-radius:3px;overflow:hidden;}
+.win-fill{height:100%;border-radius:3px;transition:width .5s;}
+.whatif-card{background:var(--s1);border:1px solid var(--bd);border-radius:var(--r);padding:13px 14px;flex-shrink:0;}
+.wi-grid{display:grid;grid-template-columns:1fr 50px 50px 50px;gap:0;}
+.wi-hd{font-size:9px;font-weight:700;text-transform:uppercase;letter-spacing:.06em;padding-bottom:6px;border-bottom:1px solid var(--bd);margin-bottom:4px;text-align:right;}
+.wi-hd:first-child{text-align:left;color:var(--t3);}
+.wi-row{display:contents;}
+.wi-cell{font-size:9px;color:var(--t3);font-weight:600;text-transform:uppercase;letter-spacing:.05em;padding:5px 0;border-bottom:1px solid var(--bd);display:flex;align-items:center;}
+.wi-val{font-family:'JetBrains Mono',monospace;font-size:11px;font-weight:600;padding:5px 0;border-bottom:1px solid var(--bd);text-align:right;display:flex;align-items:center;justify-content:flex-end;}
+
+/* toast */
+.toast{position:fixed;bottom:20px;left:50%;transform:translateX(-50%) translateY(10px);background:var(--s2);border:1px solid var(--bd);border-radius:var(--rs);padding:9px 18px;font-size:12px;font-weight:600;opacity:0;transition:all .25s;pointer-events:none;z-index:999;white-space:nowrap;}
+.toast.on{opacity:1;transform:translateX(-50%) translateY(0);}
+</style>
+</head>
+<body>
+
+<header class="hdr">
+  <div style="display:flex;align-items:center;gap:12px;">
+    <a href="/" class="back-btn">
+      <svg width="12" height="12" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2.5"><polyline points="15 18 9 12 15 6"/></svg>
+      Dashboard
+    </a>
+    <div class="hdiv"></div>
+    <a class="brand" href="/">
+      <svg width="26" height="26" viewBox="-150 -175 300 400" fill="none">
+        <polygon points="0,-160 140,80 -140,80" stroke="#F0A500" stroke-width="18" stroke-linejoin="round"/>
+        <polygon points="0,-80 70,40 -70,40" fill="#F0A500" opacity=".18"/>
+        <line x1="0" y1="-80" x2="0" y2="80" stroke="#F0A500" stroke-width="10"/>
+      </svg>
+      <div><div class="brand-name">Asgard</div><div class="brand-sub">Intelligence</div></div>
+    </a>
+    <div class="sim-badge">Simulator</div>
+  </div>
+
+  <div class="hdr-mid">
+    <div class="run-ctrl">
+      <button class="run-btn start" id="btn-run" onclick="toggleRun()">&#9654; Start</button>
+      <button class="run-btn ghost" onclick="resetSim()">Reset</button>
+    </div>
+    <div class="hdiv"></div>
+    <div class="ws-row">
+      <div class="ws-dot" id="ws-dot" style="background:var(--t3);"></div>
+      <span class="ws-lbl" id="ws-lbl">Connecting…</span>
+    </div>
+  </div>
+
+  <div class="hdr-r">
+    <div style="font-size:10px;color:var(--t3);font-weight:600;text-transform:uppercase;letter-spacing:.06em;">Odin Equity</div>
+    <div class="mono" style="font-size:14px;font-weight:700;color:var(--gold);" id="hdr-equity">—</div>
+    <div class="hdiv"></div>
+    <div style="font-size:10px;color:var(--t3);font-weight:600;text-transform:uppercase;letter-spacing:.06em;">Session</div>
+    <div class="mono" style="font-size:13px;font-weight:600;color:var(--t2);" id="hdr-elapsed">00:00:00</div>
+  </div>
+</header>
+
+<div class="top-stats">
+  <div class="stat-card">
+    <div class="stat-label">Odin P&amp;L</div>
+    <div class="stat-val mono" id="s-odin-pnl">—</div>
+    <div class="stat-sub" id="s-odin-pct">awaiting ticks</div>
+  </div>
+  <div class="stat-card">
+    <div class="stat-label">Win Rate · Odin</div>
+    <div class="stat-val mono gold" id="s-odin-wr">—</div>
+    <div class="stat-sub" id="s-odin-trades">0 closed trades</div>
+  </div>
+  <div class="stat-card">
+    <div class="stat-label">Best Trade</div>
+    <div class="stat-val mono g" id="s-best">—</div>
+    <div class="stat-sub" id="s-best-sym">—</div>
+  </div>
+  <div class="stat-card">
+    <div class="stat-label">Worst Trade</div>
+    <div class="stat-val mono r" id="s-worst">—</div>
+    <div class="stat-sub" id="s-worst-sym">—</div>
+  </div>
+  <div class="stat-card">
+    <div class="stat-label">Max Drawdown</div>
+    <div class="stat-val mono" id="s-dd">—</div>
+    <div class="stat-sub">from session peak</div>
+  </div>
+  <div class="stat-card">
+    <div class="stat-label">Sharpe (est.)</div>
+    <div class="stat-val mono" id="s-sharpe">—</div>
+    <div class="stat-sub">risk-adj. return</div>
+  </div>
+</div>
+
+<div class="body-grid">
+
+  <!-- Chart -->
+  <div class="chart-panel">
+    <div class="panel-hdr">
+      <div class="panel-title">
+        <span class="panel-ic" style="background:var(--blue-bg);color:var(--blue);">
+          <svg viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2"><polyline points="22 12 18 12 15 21 9 3 6 12 2 12"/></svg>
+        </span>
+        Live Price · Odin Entries
+      </div>
+      <div class="chart-tabs">
+        <button class="ctab on" onclick="setChartSym('BTCUSDT',this)">BTC</button>
+        <button class="ctab" onclick="setChartSym('ETHUSDT',this)">ETH</button>
+        <button class="ctab" onclick="setChartSym('EUR_USD',this)">EUR/USD</button>
+        <button class="ctab" onclick="setChartSym('XAU_USD',this)">XAU</button>
+      </div>
+    </div>
+    <canvas id="sim-canvas"></canvas>
+  </div>
+
+  <!-- Activity -->
+  <div class="activity-panel">
+    <div class="panel-hdr">
+      <div class="panel-title">
+        <span class="panel-ic" style="background:var(--gr-bg);color:var(--gr);">
+          <svg viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2"><path d="M14 2H6a2 2 0 0 0-2 2v16a2 2 0 0 0 2 2h12a2 2 0 0 0 2-2V8z"/><polyline points="14 2 14 8 20 8"/></svg>
+        </span>
+        Trade Log — all agents (Loki &amp; Thor are what-if only)
+      </div>
+      <div style="font-size:10px;color:var(--t3);" id="act-count">0 events</div>
+    </div>
+    <div class="act-log" id="act-log">
+      <div class="empty-log">Press Start to begin the simulation session</div>
+    </div>
+  </div>
+
+  <!-- Right column -->
+  <div class="right-col">
+
+    <!-- Odin -->
+    <div class="agent-card" style="border-color:var(--gold-bd);">
+      <div class="ac-hdr">
+        <div class="ac-name" style="color:var(--gold);">Odin</div>
+        <div class="ac-role" style="background:var(--gold-bg);color:var(--gold);border:1px solid var(--gold-bd);">Training · Active</div>
+      </div>
+      <div class="ac-stats">
+        <div class="ac-stat"><div class="ac-stat-label">P&amp;L</div><div class="ac-stat-val" id="ac-odin-pnl">—</div></div>
+        <div class="ac-stat"><div class="ac-stat-label">Win Rate</div><div class="ac-stat-val" id="ac-odin-wr" style="color:var(--gold);">—</div></div>
+        <div class="ac-stat"><div class="ac-stat-label">Trades</div><div class="ac-stat-val" id="ac-odin-trades">0</div></div>
+        <div class="ac-stat"><div class="ac-stat-label">Open</div><div class="ac-stat-val" id="ac-odin-open" style="color:var(--t3);">None</div></div>
+      </div>
+      <div class="win-bar-wrap">
+        <div class="win-bar-label"><span>Win rate</span><span id="ac-odin-wr-pct">0%</span></div>
+        <div class="win-bar"><div class="win-fill" id="ac-odin-bar" style="width:0%;background:var(--gold);"></div></div>
+      </div>
+    </div>
+
+    <div style="font-size:9px;font-weight:700;color:var(--t3);text-transform:uppercase;letter-spacing:.08em;padding:2px 2px 0;">What-If — same ticks, different strategy</div>
+
+    <!-- Loki -->
+    <div class="agent-card">
+      <div class="ac-hdr">
+        <div class="ac-name" style="color:var(--blue);">Loki</div>
+        <select id="loki-pillar" onchange="changeLokiPillar()" style="background:var(--s2);border:1px solid var(--blue-bd);border-radius:var(--rs);padding:3px 8px;font-size:10px;font-weight:600;color:var(--blue);outline:none;cursor:pointer;">
+          <option value="math">Math</option>
+          <option value="trends">Trends</option>
+          <option value="patterns">Patterns</option>
+        </select>
+      </div>
+      <div style="font-size:9px;color:var(--t3);margin-bottom:9px;" id="loki-pillar-desc">Moving average crossover + RSI · resets stats on change</div>
+      <div class="ac-stats">
+        <div class="ac-stat"><div class="ac-stat-label">P&amp;L</div><div class="ac-stat-val" id="ac-loki-pnl">—</div></div>
+        <div class="ac-stat"><div class="ac-stat-label">Win Rate</div><div class="ac-stat-val" id="ac-loki-wr" style="color:var(--blue);">—</div></div>
+        <div class="ac-stat"><div class="ac-stat-label">Trades</div><div class="ac-stat-val" id="ac-loki-trades">0</div></div>
+        <div class="ac-stat"><div class="ac-stat-label">vs Odin</div><div class="ac-stat-val" id="ac-loki-vs" style="color:var(--t3);">—</div></div>
+      </div>
+      <div class="win-bar-wrap">
+        <div class="win-bar-label"><span>Win rate</span><span id="ac-loki-wr-pct">0%</span></div>
+        <div class="win-bar"><div class="win-fill" id="ac-loki-bar" style="width:0%;background:var(--blue);"></div></div>
+      </div>
+    </div>
+
+    <!-- Thor -->
+    <div class="agent-card">
+      <div class="ac-hdr">
+        <div class="ac-name" style="color:var(--pu);">Thor</div>
+        <div class="ac-role" style="background:var(--pu-bg);color:var(--pu);border:1px solid var(--pu-bd);">Multi-Signal · What-If</div>
+      </div>
+      <div class="ac-stats">
+        <div class="ac-stat"><div class="ac-stat-label">P&amp;L</div><div class="ac-stat-val" id="ac-thor-pnl">—</div></div>
+        <div class="ac-stat"><div class="ac-stat-label">Win Rate</div><div class="ac-stat-val" id="ac-thor-wr" style="color:var(--pu);">—</div></div>
+        <div class="ac-stat"><div class="ac-stat-label">Trades</div><div class="ac-stat-val" id="ac-thor-trades">0</div></div>
+        <div class="ac-stat"><div class="ac-stat-label">vs Odin</div><div class="ac-stat-val" id="ac-thor-vs" style="color:var(--t3);">—</div></div>
+      </div>
+      <div class="win-bar-wrap">
+        <div class="win-bar-label"><span>Win rate</span><span id="ac-thor-wr-pct">0%</span></div>
+        <div class="win-bar"><div class="win-fill" id="ac-thor-bar" style="width:0%;background:var(--pu);"></div></div>
+      </div>
+    </div>
+
+    <!-- Head-to-head -->
+    <div class="whatif-card">
+      <div class="panel-title" style="margin-bottom:10px;">
+        <span class="panel-ic" style="background:var(--pu-bg);color:var(--pu);display:flex;align-items:center;justify-content:center;width:22px;height:22px;border-radius:6px;">
+          <svg width="11" height="11" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2"><line x1="18" y1="20" x2="18" y2="10"/><line x1="12" y1="20" x2="12" y2="4"/><line x1="6" y1="20" x2="6" y2="14"/></svg>
+        </span>
+        Head-to-Head
+      </div>
+      <div class="wi-grid">
+        <div class="wi-hd"></div>
+        <div class="wi-hd" style="color:var(--gold);">Odin</div>
+        <div class="wi-hd" style="color:var(--blue);">Loki</div>
+        <div class="wi-hd" style="color:var(--pu);">Thor</div>
+
+        <div class="wi-cell">P&amp;L</div>
+        <div class="wi-val" id="h2h-odin-pnl" style="color:var(--gold);">—</div>
+        <div class="wi-val" id="h2h-loki-pnl" style="color:var(--blue);">—</div>
+        <div class="wi-val" id="h2h-thor-pnl" style="color:var(--pu);">—</div>
+
+        <div class="wi-cell">Win %</div>
+        <div class="wi-val" id="h2h-odin-wr" style="color:var(--gold);">—</div>
+        <div class="wi-val" id="h2h-loki-wr" style="color:var(--blue);">—</div>
+        <div class="wi-val" id="h2h-thor-wr" style="color:var(--pu);">—</div>
+
+        <div class="wi-cell">Trades</div>
+        <div class="wi-val" id="h2h-odin-t" style="color:var(--gold);">0</div>
+        <div class="wi-val" id="h2h-loki-t" style="color:var(--blue);">0</div>
+        <div class="wi-val" id="h2h-thor-t" style="color:var(--pu);">0</div>
+
+        <div class="wi-cell" style="border-bottom:none;">Drawdown</div>
+        <div class="wi-val" id="h2h-odin-dd" style="color:var(--gold);border-bottom:none;">—</div>
+        <div class="wi-val" id="h2h-loki-dd" style="color:var(--blue);border-bottom:none;">—</div>
+        <div class="wi-val" id="h2h-thor-dd" style="color:var(--pu);border-bottom:none;">—</div>
+      </div>
+    </div>
+  </div>
+</div>
+
+<div class="toast" id="toast"></div>
+
+<script>
+// ── PARAMS ──
+const params   = new URLSearchParams(location.search);
+const CAPITAL  = Number(params.get('capital') || 100000);
+const TOKEN    = params.get('token') || '';
+
+// ── RUNNING STATE ──
+let running = false;
+let startedAt = null;
+let elapsedTimer = null;
+
+// ── PRICE STATE ──
+// chartBuf  — always fills from WS, used only for drawing the chart
+// simBuf    — only fills while running=true, used by agent strategies
+const SYM_LIST = ['BTCUSDT','ETHUSDT','EUR_USD','XAU_USD'];
+const chartBuf = {};   // sym -> [price, ...]  (max 200, always live)
+const simBuf   = {};   // sym -> [price, ...]  (only ticks received while running)
+SYM_LIST.forEach(s => { chartBuf[s] = []; simBuf[s] = []; });
+
+let chartSym = 'BTCUSDT';
+let tradeMarkers = [];   // chart dots for Odin entries only
+
+// ── AGENT STATE ──
+function mkAgent() {
+  return {
+    equity: CAPITAL, peak: CAPITAL, maxDD: 0,
+    wins: 0, losses: 0, trades: [],
+    openPos: null,   // {sym, dir, entry, size, openAt}  (openAt = simBuf[sym].length at entry)
+    cooldown: {},    // sym -> ticks remaining before next signal allowed
+    pnlSeries: [0],
+  };
+}
+let AG = { odin: mkAgent(), loki: mkAgent(), thor: mkAgent() };
+let actLog = [];
+
+// ── STRATEGIES ──
+// All three use simBuf so they only see ticks from the running session.
+
+function odinSignal(buf) {
+  if (buf.length < 20) return null;
+  const ma8  = avg(buf.slice(-8));
+  const ma20 = avg(buf.slice(-20));
+  const rsi  = calcRSI(buf, 14);
+  if (ma8 > ma20 * 1.0003 && rsi < 65) return 'BUY';
+  if (ma8 < ma20 * 0.9997 && rsi > 35) return 'SELL';
+  return null;
+}
+
+// ── LOKI PILLAR STRATEGIES ──
+let lokiPillar = 'math';
+
+const LOKI_DESC = {
+  math:     'Moving average crossover + RSI · resets stats on change',
+  trends:   'EMA slope & momentum trend-follow · resets stats on change',
+  patterns: 'Price action swing highs/lows · resets stats on change',
+};
+
+function lokiMath(buf) {
+  // MA crossover with RSI filter
+  if (buf.length < 20) return null;
+  const ma5  = avg(buf.slice(-5));
+  const ma20 = avg(buf.slice(-20));
+  const rsi  = calcRSI(buf, 14);
+  if (ma5 > ma20 * 1.0004 && rsi > 50 && rsi < 68) return 'BUY';
+  if (ma5 < ma20 * 0.9996 && rsi < 50 && rsi > 32) return 'SELL';
+  return null;
+}
+
+function lokiTrends(buf) {
+  // EMA slope: compare short EMA to its own value N ticks ago
+  if (buf.length < 15) return null;
+  const ema = (arr, p) => arr.slice(-p).reduce((a,v,i,s) => a + v * (2/(p+1)) * Math.pow(1-(2/(p+1)),s.length-1-i), 0);
+  const e8now  = avg(buf.slice(-8));
+  const e8prev = avg(buf.slice(-14, -6));
+  const slope  = (e8now - e8prev) / e8prev;
+  const rsi    = calcRSI(buf, 14);
+  if (slope >  0.0012 && rsi < 70) return 'BUY';
+  if (slope < -0.0012 && rsi > 30) return 'SELL';
+  return null;
+}
+
+function lokiPatterns(buf) {
+  // Swing high/low detection: look for local pivot then breakout
+  if (buf.length < 16) return null;
+  const w = buf.slice(-16);
+  const mid = w.slice(4, 12);
+  const swingH = Math.max(...mid);
+  const swingL = Math.min(...mid);
+  const last   = buf[buf.length - 1];
+  const prev   = buf[buf.length - 5];
+  if (last > swingH && prev <= swingH) return 'BUY';
+  if (last < swingL && prev >= swingL) return 'SELL';
+  return null;
+}
+
+function lokiSignal(buf) {
+  if (lokiPillar === 'math')     return lokiMath(buf);
+  if (lokiPillar === 'trends')   return lokiTrends(buf);
+  if (lokiPillar === 'patterns') return lokiPatterns(buf);
+  return null;
+}
+
+function changeLokiPillar() {
+  lokiPillar = document.getElementById('loki-pillar').value;
+  document.getElementById('loki-pillar-desc').textContent = LOKI_DESC[lokiPillar];
+  // Reset only Loki state so stats are fresh for the new strategy
+  AG.loki = mkAgent();
+  SYM_LIST.forEach(s => { simBuf[s] = simBuf[s]; }); // keep simBuf, Loki just starts fresh
+  actLog = actLog.filter(e => e.agentId !== 'loki');
+  renderActivity();
+  updateStats();
+  toast('Loki switched to ' + lokiPillar.charAt(0).toUpperCase() + lokiPillar.slice(1) + ' — stats reset');
+}
+
+function thorSignal(buf) {
+  // Triple MA + RSI confirmation — needs more data, trades less
+  if (buf.length < 30) return null;
+  const ma5  = avg(buf.slice(-5));
+  const ma15 = avg(buf.slice(-15));
+  const ma30 = avg(buf.slice(-30));
+  const rsi  = calcRSI(buf, 14);
+  if (ma5 > ma15 && ma15 > ma30 && rsi > 45 && rsi < 68) return 'BUY';
+  if (ma5 < ma15 && ma15 < ma30 && rsi < 55 && rsi > 32) return 'SELL';
+  return null;
+}
+
+// ticks to hold before force-close
+const HOLD  = { odin: 15, loki: 8, thor: 22 };
+// risk per trade as fraction of equity
+const RISK  = { odin: 0.02, loki: 0.025, thor: 0.015 };
+const STRATS = { odin: odinSignal, loki: lokiSignal, thor: thorSignal };
+
+// ── SIMULATION STEP ──
+// Called ONLY when running === true, ONLY with ticks from simBuf
+function simStep(sym, price) {
+  ['odin','loki','thor'].forEach(id => {
+    const ag  = AG[id];
+    const buf = simBuf[sym];
+
+    // 1. Check if open position on this symbol should be closed
+    if (ag.openPos && ag.openPos.sym === sym) {
+      const held = buf.length - ag.openPos.openAt;
+      if (held >= HOLD[id]) closeTrade(id, ag, sym, price);
+    }
+
+    // 2. Skip if cooldown active or already in a position
+    ag.cooldown[sym] = (ag.cooldown[sym] || 0);
+    if (ag.cooldown[sym] > 0) { ag.cooldown[sym]--; return; }
+    if (ag.openPos) return;
+
+    // 3. Get signal
+    const sig = STRATS[id](buf);
+    if (!sig) return;
+
+    // 4. Open trade
+    const size = (ag.equity * RISK[id]) / price;
+    ag.openPos = { sym, dir: sig, entry: price, size, openAt: buf.length };
+    ag.cooldown[sym] = 10;
+
+    pushActivity(id, 'OPEN', sig, sym, price, null);
+
+    // Mark on chart only for Odin so it's not cluttered
+    if (id === 'odin' && sym === chartSym) {
+      tradeMarkers.push({ idx: chartBuf[sym].length - 1, dir: sig });
+      if (tradeMarkers.length > 30) tradeMarkers.shift();
+    }
+  });
+}
+
+function closeTrade(id, ag, sym, price) {
+  const pos = ag.openPos;
+  // Raw P&L
+  let pnl = pos.dir === 'BUY'
+    ? (price - pos.entry) * pos.size
+    : (pos.entry - price) * pos.size;
+  // Deduct spread
+  pnl -= pos.entry * pos.size * 0.0002;
+
+  ag.equity += pnl;
+  ag.peak = Math.max(ag.peak, ag.equity);
+  const dd = (ag.peak - ag.equity) / ag.peak * 100;
+  ag.maxDD = Math.max(ag.maxDD, dd);
+  ag.pnlSeries.push(ag.equity - CAPITAL);
+
+  if (pnl > 0) ag.wins++; else ag.losses++;
+  ag.trades.push({ sym, dir: pos.dir, pnl, entry: pos.entry, exit: price });
+  ag.openPos = null;
+
+  pushActivity(id, 'CLOSE', pos.dir, sym, price, pnl);
+}
+
+// ── ACTIVITY LOG ──
+const AC = {
+  odin: { bg:'var(--gold-bg)', color:'var(--gold)', bd:'var(--gold-bd)' },
+  loki: { bg:'var(--blue-bg)', color:'var(--blue)', bd:'var(--blue-bd)' },
+  thor: { bg:'var(--pu-bg)',   color:'var(--pu)',   bd:'var(--pu-bd)'   },
+};
+
+function pushActivity(agentId, type, dir, sym, price, pnl) {
+  const t = new Date().toTimeString().slice(0, 8);
+  actLog.unshift({ agentId, type, dir, sym, price, pnl, t });
+  if (actLog.length > 120) actLog.pop();
+  renderActivity();
+}
+
+function renderActivity() {
+  const box = document.getElementById('act-log');
+  if (!actLog.length) {
+    box.innerHTML = '<div class="empty-log">Press Start to begin the simulation session</div>';
+    return;
+  }
+  box.innerHTML = actLog.slice(0, 50).map(e => {
+    const ac = AC[e.agentId];
+    const dirClass = e.dir === 'BUY' ? 'buy' : 'sell';
+    const typeLabel = e.type === 'CLOSE' ? 'Close' : e.dir;
+    const dirHtml = e.type === 'CLOSE'
+      ? `<span class="act-dir close">✓ ${e.dir}</span>`
+      : `<span class="act-dir ${dirClass}">${e.dir}</span>`;
+    const pnlHtml = e.pnl != null
+      ? `<span class="act-pnl ${e.pnl > 0 ? 'g' : 'r'}">${e.pnl > 0 ? '+' : ''}$${Math.abs(e.pnl).toFixed(2)}</span>`
+      : `<span class="act-pnl n">@${fmtP(e.price)}</span>`;
+    return `<div class="act-row">
+      <span class="act-time">${e.t}</span>
+      <span class="act-agent" style="background:${ac.bg};color:${ac.color};border:1px solid ${ac.bd};">${e.agentId}</span>
+      ${dirHtml}
+      <span class="act-sym">${e.sym.replace('_','/')}</span>
+      ${pnlHtml}
+    </div>`;
+  }).join('');
+  document.getElementById('act-count').textContent = actLog.length + ' events';
+}
+
+// ── UPDATE STATS UI ──
+function fmt$(v) {
+  if (v == null) return '—';
+  const s = '$' + Math.abs(v).toLocaleString('en', { minimumFractionDigits: 2, maximumFractionDigits: 2 });
+  return (v < 0 ? '-' : '+') + s;
+}
+function fmtP(p) {
+  return p > 100 ? p.toLocaleString('en', { minimumFractionDigits: 2, maximumFractionDigits: 2 }) : p.toFixed(5);
+}
+function fmtWR(w, l) {
+  const t = w + l; return t ? Math.round(w / t * 100) + '%' : '—';
+}
+function wrPct(w, l) {
+  const t = w + l; return t ? Math.round(w / t * 100) : 0;
+}
+
+function updateStats() {
+  const o = AG.odin, lk = AG.loki, th = AG.thor;
+  const oPnl = o.equity - CAPITAL;
+  const lPnl = lk.equity - CAPITAL;
+  const tPnl = th.equity - CAPITAL;
+
+  // Header equity
+  document.getElementById('hdr-equity').textContent = '$' + o.equity.toLocaleString('en', {minimumFractionDigits:2,maximumFractionDigits:2});
+
+  // Top stats — only meaningful once we have closed trades
+  const ot = o.wins + o.losses;
+  if (ot > 0 || o.openPos) {
+    const pnlEl = document.getElementById('s-odin-pnl');
+    pnlEl.textContent = fmt$(oPnl);
+    pnlEl.className = 'stat-val mono ' + (oPnl > 0 ? 'g' : oPnl < 0 ? 'r' : '');
+    document.getElementById('s-odin-pct').textContent = (oPnl >= 0 ? '+' : '') + (oPnl / CAPITAL * 100).toFixed(3) + '%';
+    document.getElementById('s-odin-wr').textContent = fmtWR(o.wins, o.losses);
+    document.getElementById('s-odin-trades').textContent = ot + ' closed trade' + (ot !== 1 ? 's' : '');
+    document.getElementById('s-dd').textContent = o.maxDD.toFixed(2) + '%';
+  }
+
+  // Best / worst across all agents
+  const all = [...o.trades, ...lk.trades, ...th.trades];
+  if (all.length) {
+    const best  = all.reduce((a, b) => b.pnl > a.pnl ? b : a);
+    const worst = all.reduce((a, b) => b.pnl < a.pnl ? b : a);
+    document.getElementById('s-best').textContent  = fmt$(best.pnl);
+    document.getElementById('s-best-sym').textContent  = best.sym.replace('_','/');
+    document.getElementById('s-worst').textContent = fmt$(worst.pnl);
+    document.getElementById('s-worst-sym').textContent = worst.sym.replace('_','/');
+  }
+
+  // Sharpe (Odin)
+  if (o.pnlSeries.length > 5) {
+    const rets = o.pnlSeries.slice(1).map((v, i) => v - o.pnlSeries[i]);
+    const mu = avg(rets), sig = stddev(rets);
+    document.getElementById('s-sharpe').textContent = sig > 0 ? (mu / sig * Math.sqrt(252)).toFixed(2) : '—';
+  }
+
+  // Agent cards
+  function fillCard(id, ag) {
+    const pnl = ag.equity - CAPITAL;
+    const t   = ag.wins + ag.losses;
+    const wr  = fmtWR(ag.wins, ag.losses);
+    const wrP = wrPct(ag.wins, ag.losses);
+
+    const pnlEl = document.getElementById(`ac-${id}-pnl`);
+    pnlEl.textContent = t > 0 ? fmt$(pnl) : '—';
+    pnlEl.style.color = pnl > 0 ? 'var(--gr)' : pnl < 0 ? 'var(--re)' : '';
+
+    document.getElementById(`ac-${id}-wr`).textContent = wr;
+    document.getElementById(`ac-${id}-trades`).textContent = t;
+    document.getElementById(`ac-${id}-wr-pct`).textContent = wrP + '%';
+    document.getElementById(`ac-${id}-bar`).style.width = wrP + '%';
+
+    if (id === 'odin') {
+      const op = ag.openPos;
+      document.getElementById('ac-odin-open').textContent = op ? op.dir + ' ' + op.sym.replace('_','/') : 'None';
+      document.getElementById('ac-odin-open').style.color = op ? (op.dir === 'BUY' ? 'var(--gr)' : 'var(--re)') : 'var(--t3)';
+    } else {
+      const diff = pnl - oPnl;
+      const vsEl = document.getElementById(`ac-${id}-vs`);
+      if (t > 0) {
+        vsEl.textContent = (diff >= 0 ? '+' : '') + '$' + Math.abs(diff).toFixed(0);
+        vsEl.style.color = diff >= 0 ? 'var(--gr)' : 'var(--re)';
+      }
+    }
+
+    // H2H table
+    document.getElementById(`h2h-${id}-pnl`).textContent = t > 0 ? fmt$(pnl) : '—';
+    document.getElementById(`h2h-${id}-wr`).textContent  = wr;
+    document.getElementById(`h2h-${id}-t`).textContent   = t;
+    document.getElementById(`h2h-${id}-dd`).textContent  = ag.maxDD > 0 ? ag.maxDD.toFixed(1) + '%' : '—';
+  }
+
+  fillCard('odin', o);
+  fillCard('loki', lk);
+  fillCard('thor', th);
+}
+
+// ── CHART ──
+const canvas = document.getElementById('sim-canvas');
+const ctx = canvas.getContext('2d');
+
+function resizeCanvas() {
+  canvas.width  = canvas.offsetWidth  * devicePixelRatio;
+  canvas.height = canvas.offsetHeight * devicePixelRatio;
+  drawChart();
+}
+
+function setChartSym(sym, btn) {
+  chartSym = sym;
+  document.querySelectorAll('.ctab').forEach(b => b.classList.remove('on'));
+  btn.classList.add('on');
+  tradeMarkers = [];
+  drawChart();
+}
+
+function drawChart() {
+  const buf = chartBuf[chartSym];
+  const W = canvas.width, H = canvas.height;
+  const dpr = devicePixelRatio;
+  ctx.clearRect(0, 0, W, H);
+
+  if (buf.length < 2) {
+    ctx.fillStyle = 'rgba(128,145,168,0.25)';
+    ctx.font = `${11 * dpr}px Outfit, sans-serif`;
+    ctx.textAlign = 'center';
+    ctx.textBaseline = 'middle';
+    ctx.fillText('Waiting for live price data…', W / 2, H / 2);
+    return;
+  }
+
+  const slice = buf.slice(-150);
+  const min   = Math.min(...slice) * 0.9998;
+  const max   = Math.max(...slice) * 1.0002;
+  const range = max - min || 1;
+  const pad   = { t: 14 * dpr, r: 8 * dpr, b: 26 * dpr, l: 62 * dpr };
+  const cW = W - pad.l - pad.r;
+  const cH = H - pad.t - pad.b;
+  const xOf = i  => pad.l + (i / (slice.length - 1)) * cW;
+  const yOf = p  => pad.t + (1 - (p - min) / range) * cH;
+
+  // Grid lines + y labels
+  for (let i = 0; i <= 4; i++) {
+    const y = pad.t + (i / 4) * cH;
+    const pv = max - (i / 4) * range;
+    ctx.strokeStyle = 'rgba(255,255,255,0.04)';
+    ctx.lineWidth = dpr;
+    ctx.beginPath(); ctx.moveTo(pad.l, y); ctx.lineTo(W - pad.r, y); ctx.stroke();
+    ctx.fillStyle = 'rgba(128,145,168,0.45)';
+    ctx.font = `${9 * dpr}px JetBrains Mono, monospace`;
+    ctx.textAlign = 'right';
+    ctx.textBaseline = 'middle';
+    ctx.fillText(pv > 100 ? pv.toLocaleString('en',{minimumFractionDigits:2,maximumFractionDigits:2}) : pv.toFixed(5), pad.l - 5 * dpr, y);
+  }
+
+  // Gradient fill under line
+  const grad = ctx.createLinearGradient(0, pad.t, 0, pad.t + cH);
+  grad.addColorStop(0, 'rgba(75,157,255,0.14)');
+  grad.addColorStop(1, 'rgba(75,157,255,0)');
+  ctx.beginPath();
+  slice.forEach((p, i) => i === 0 ? ctx.moveTo(xOf(i), yOf(p)) : ctx.lineTo(xOf(i), yOf(p)));
+  ctx.lineTo(xOf(slice.length - 1), pad.t + cH);
+  ctx.lineTo(xOf(0), pad.t + cH);
+  ctx.closePath();
+  ctx.fillStyle = grad; ctx.fill();
+
+  // Price line
+  ctx.beginPath();
+  ctx.strokeStyle = '#4B9DFF'; ctx.lineWidth = 1.5 * dpr; ctx.lineJoin = 'round';
+  slice.forEach((p, i) => i === 0 ? ctx.moveTo(xOf(i), yOf(p)) : ctx.lineTo(xOf(i), yOf(p)));
+  ctx.stroke();
+
+  // Trade markers (Odin entries only)
+  const bufOffset = Math.max(0, buf.length - 150);
+  tradeMarkers.forEach(m => {
+    const i = m.idx - bufOffset;
+    if (i < 0 || i >= slice.length) return;
+    const x = xOf(i), y = yOf(slice[i]);
+    ctx.beginPath();
+    ctx.arc(x, y, 5 * dpr, 0, Math.PI * 2);
+    ctx.fillStyle = m.dir === 'BUY' ? 'rgba(34,197,94,0.9)' : 'rgba(244,63,94,0.9)';
+    ctx.fill();
+    ctx.strokeStyle = '#fff'; ctx.lineWidth = dpr; ctx.stroke();
+  });
+
+  // Last-price label
+  const last = slice[slice.length - 1];
+  const lx = xOf(slice.length - 1), ly = yOf(last);
+  const lbl = last > 100 ? last.toLocaleString('en',{minimumFractionDigits:2,maximumFractionDigits:2}) : last.toFixed(5);
+  ctx.font = `bold ${9 * dpr}px JetBrains Mono, monospace`;
+  ctx.textAlign = 'center';
+  const tw = ctx.measureText(lbl).width + 14 * dpr;
+  ctx.fillStyle = 'rgba(75,157,255,0.92)';
+  ctx.fillRect(lx - tw / 2, ly - 10 * dpr, tw, 18 * dpr);
+  ctx.fillStyle = '#fff';
+  ctx.textBaseline = 'middle';
+  ctx.fillText(lbl, lx, ly);
+}
+
+// ── WEBSOCKET ──
+let ws = null;
+function connectWS() {
+  const proto = location.protocol === 'https:' ? 'wss:' : 'ws:';
+  const url = proto + '//' + location.host + '/ws/live' + (TOKEN ? '?token=' + encodeURIComponent(TOKEN) : '');
+  ws = new WebSocket(url);
+  ws.onopen  = () => setWSState(true);
+  ws.onclose = () => { setWSState(false); setTimeout(connectWS, 3000); };
+  ws.onerror = () => { try { ws.close(); } catch(_){} };
+  ws.onmessage = ev => {
+    let d; try { d = JSON.parse(ev.data); } catch(_) { return; }
+    if (d.type === 'tick' && d.symbol && SYM_LIST.includes(d.symbol)) {
+      onTick(d.symbol, Number(d.price));
+    }
+  };
+}
+
+function setWSState(ok) {
+  const dot = document.getElementById('ws-dot');
+  const lbl = document.getElementById('ws-lbl');
+  dot.style.background  = ok ? 'var(--gr)' : 'var(--t3)';
+  dot.style.boxShadow   = ok ? '0 0 6px var(--gr)' : 'none';
+  dot.style.animation   = ok ? 'blink 2s infinite' : 'none';
+  lbl.textContent = ok ? 'Live Data' : 'Reconnecting…';
+}
+
+function onTick(sym, price) {
+  if (!Number.isFinite(price) || price <= 0) return;
+
+  // Always push to chart buffer (so chart is always live)
+  const cb = chartBuf[sym];
+  cb.push(price);
+  if (cb.length > 200) cb.shift();
+  if (sym === chartSym) drawChart();
+
+  // Only push to simBuf and run strategies when simulation is active
+  if (!running) return;
+  const sb = simBuf[sym];
+  sb.push(price);
+  if (sb.length > 200) sb.shift();
+  simStep(sym, price);
+  updateStats();
+}
+
+// ── CONTROLS ──
+function toggleRun() {
+  if (!running) {
+    running = true;
+    startedAt = Date.now();
+    startElapsed();
+    const btn = document.getElementById('btn-run');
+    btn.textContent = '⏸ Pause';
+    btn.className = 'run-btn pause';
+    toast('Simulation started — tracking live ticks from this moment');
+  } else {
+    running = false;
+    stopElapsed();
+    const btn = document.getElementById('btn-run');
+    btn.textContent = '▶ Resume';
+    btn.className = 'run-btn start';
+    toast('Paused — no new trades while paused');
+  }
+}
+
+function resetSim() {
+  running = false;
+  stopElapsed();
+  startedAt = null;
+  tradeMarkers = [];
+  actLog = [];
+  SYM_LIST.forEach(s => { simBuf[s] = []; });
+  AG = { odin: mkAgent(), loki: mkAgent(), thor: mkAgent() };
+  document.getElementById('btn-run').textContent = '▶ Start';
+  document.getElementById('btn-run').className   = 'run-btn start';
+  document.getElementById('hdr-elapsed').textContent = '00:00:00';
+  document.getElementById('hdr-equity').textContent  = '—';
+  // Reset top stats to dashes
+  ['s-odin-pnl','s-odin-wr','s-best','s-worst','s-dd','s-sharpe'].forEach(id => {
+    document.getElementById(id).textContent = '—';
+    document.getElementById(id).className = 'stat-val mono';
+  });
+  document.getElementById('s-odin-pct').textContent   = 'awaiting ticks';
+  document.getElementById('s-odin-trades').textContent = '0 closed trades';
+  renderActivity();
+  updateStats();
+  drawChart();
+  toast('Reset — chart data retained, simulation state cleared');
+}
+
+// ── ELAPSED TIMER (wall clock, no multiplier) ──
+function startElapsed() {
+  stopElapsed();
+  elapsedTimer = setInterval(() => {
+    const sec = Math.floor((Date.now() - startedAt) / 1000);
+    const h = Math.floor(sec / 3600).toString().padStart(2,'0');
+    const m = Math.floor((sec % 3600) / 60).toString().padStart(2,'0');
+    const s = (sec % 60).toString().padStart(2,'0');
+    document.getElementById('hdr-elapsed').textContent = h + ':' + m + ':' + s;
+  }, 1000);
+}
+function stopElapsed() {
+  if (elapsedTimer) { clearInterval(elapsedTimer); elapsedTimer = null; }
+}
+
+// ── MATH HELPERS ──
+function avg(arr) { return arr.reduce((a,b) => a+b, 0) / arr.length; }
+function stddev(arr) {
+  const m = avg(arr);
+  return Math.sqrt(arr.reduce((a,b) => a + (b-m)**2, 0) / arr.length);
+}
+function calcRSI(buf, period) {
+  if (buf.length < period + 1) return 50;
+  let gains = 0, losses = 0;
+  for (let i = buf.length - period; i < buf.length; i++) {
+    const d = buf[i] - buf[i-1];
+    if (d > 0) gains += d; else losses -= d;
+  }
+  if (losses === 0) return 100;
+  return 100 - 100 / (1 + gains / losses);
+}
+
+// ── TOAST ──
+function toast(msg) {
+  const el = document.getElementById('toast');
+  el.textContent = msg;
+  el.classList.add('on');
+  setTimeout(() => el.classList.remove('on'), 2500);
+}
+
+// ── BOOT ──
+window.addEventListener('resize', resizeCanvas);
+new ResizeObserver(resizeCanvas).observe(canvas);
+connectWS();
+renderActivity();
+</script>
+</body>
+</html>

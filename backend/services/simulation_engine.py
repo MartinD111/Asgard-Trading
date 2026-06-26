@@ -24,7 +24,8 @@ import redis.asyncio as aioredis
 from sqlalchemy import text
 
 from db.database import AsyncSessionLocal
-from services.decision_engine import _calculate_technical_score, ALL_SYMBOLS
+from services.indicators import technical_score as _calculate_technical_score
+from services.decision_engine import ALL_SYMBOLS
 from services.pattern_recognizer import analyze_patterns
 
 logger = logging.getLogger(__name__)

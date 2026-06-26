@@ -16,7 +16,12 @@
       "PowerShell($py = \\(Get-Command python -ErrorAction SilentlyContinue\\); if\\(-not $py\\){$py=\\(Get-Command py -ErrorAction SilentlyContinue\\)}; if\\(-not $py\\){$py=\\(Get-Command python3 -ErrorAction SilentlyContinue\\)}; if\\($py\\){ Write-Output \\(\"Using: \"+$py.Source\\) } else { Write-Output \"NO_PYTHON\" })",
       "Bash(py -3 --version)",
       "Bash(py -3 -c \"import ast,sys; files=['services/simulation_engine.py','services/market_data.py','routers/simulation.py','main.py']; [ \\(ast.parse\\(open\\(f,encoding='utf-8'\\).read\\(\\)\\), print\\('OK',f\\)\\) for f in files ]\")",
-      "Bash(py -m pytest tests/ -v)"
+      "Bash(py -m pytest tests/ -v)",
+      "Bash(git submodule *)",
+      "Bash(git -C frontend remote -v)",
+      "Bash(git -C frontend status --short)",
+      "Bash(rm -rf frontend)",
+      "Bash(git rm *)"
     ],
     "additionalDirectories": [
       "c:\\Users\\marti\\.claude\\projects\\c--Users-marti-AMS-d-o-o-Asgard-Trading\\memory"

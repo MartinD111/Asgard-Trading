@@ -1,0 +1,510 @@
+<!DOCTYPE html>
+<html lang="en">
+<head>
+<meta charset="UTF-8">
+<meta name="viewport" content="width=device-width, initial-scale=1.0">
+<title>Asgard | AI Trading Intelligence</title>
+<meta name="description" content="Asgard — AI-powered trading intelligence. Multi-agent market analysis, paper and live execution.">
+<meta name="theme-color" content="#080C14">
+<meta name="color-scheme" content="dark">
+<meta property="og:title" content="Asgard | AI Trading Intelligence">
+<meta property="og:description" content="AI-powered multi-agent trading intelligence.">
+<meta property="og:type" content="website">
+<link rel="icon" href="data:image/svg+xml,%3Csvg xmlns='http://www.w3.org/2000/svg' viewBox='-150 -175 300 400'%3E%3Cpath d='M0 -150 L120 -90 L120 70 Q120 150 0 200 Q-120 150 -120 70 L-120 -90 Z' fill='none' stroke='%23F0A500' stroke-width='14' stroke-linejoin='round'/%3E%3Cpolyline points='-70,40 -25,-10 10,30 70,-50' fill='none' stroke='%234B9DFF' stroke-width='14' stroke-linecap='round' stroke-linejoin='round'/%3E%3C/svg%3E">
+<link rel="preconnect" href="https://fonts.googleapis.com">
+<link rel="preconnect" href="https://fonts.gstatic.com" crossorigin>
+<link href="https://fonts.googleapis.com/css2?family=Outfit:wght@400;500;600;700;800&family=JetBrains+Mono:wght@400;500;600&display=swap" rel="stylesheet">
+<link rel="stylesheet" href="/static/app.css">
+</head>
+<body>
+
+<!-- ═══ HEADER ═══ -->
+<header class="hdr">
+  <a class="brand" onclick="sv('trade')">
+    <svg viewBox="-150 -175 300 400" fill="none" aria-label="Asgard">
+      <path d="M0 -150 L120 -90 L120 70 Q120 150 0 200 Q-120 150 -120 70 L-120 -90 Z" fill="none" stroke="#F0A500" stroke-width="14" stroke-linejoin="round"/>
+      <polyline points="-70,40 -25,-10 10,30 70,-50" fill="none" stroke="#4B9DFF" stroke-width="14" stroke-linecap="round" stroke-linejoin="round"/>
+      <polyline points="40,-50 70,-50 70,-20" fill="none" stroke="#4B9DFF" stroke-width="14" stroke-linecap="round" stroke-linejoin="round"/>
+    </svg>
+    <div><div class="brand-name">Asgard</div><div class="brand-sub">Intelligence</div></div>
+  </a>
+
+  <nav class="nav">
+    <button class="nb on" data-v="trade" onclick="sv('trade')">
+      <svg viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2"><polyline points="22 7 13.5 15.5 8.5 10.5 2 17"/><polyline points="16 7 22 7 22 13"/></svg>Trade
+    </button>
+    <button class="nb" data-v="stats" onclick="sv('stats')">
+      <svg viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2"><rect x="18" y="3" width="4" height="18"/><rect x="10" y="8" width="4" height="13"/><rect x="2" y="13" width="4" height="8"/></svg>Stats
+    </button>
+    <button class="nb" data-v="activity" onclick="sv('activity')">
+      <svg viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2"><polyline points="22 12 18 12 15 21 9 3 6 12 2 12"/></svg>Activity
+    </button>
+  </nav>
+
+  <div class="hdr-r">
+    <div class="live"><span class="ldot" id="ldot"></span><span id="live-lbl">Connecting</span></div>
+    <div class="hdiv"></div>
+    <div class="mets">
+      <div class="met"><span class="ml">Total Equity</span><span class="mv" id="hdr-equity">$0.00</span></div>
+      <div class="met"><span class="ml">Available</span><span class="mv g" id="hdr-balance">$0.00</span></div>
+    </div>
+    <div class="hdiv"></div>
+    <div class="profile-wrap">
+      <button class="ibt" id="notif-btn" aria-label="Notifications" onclick="toggleNotif(event)">
+        <svg viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2"><path d="M18 8A6 6 0 0 0 6 8c0 7-3 9-3 9h18s-3-2-3-9"/><path d="M13.73 21a2 2 0 0 1-3.46 0"/></svg>
+        <span class="ndot hide" id="notif-dot"></span>
+      </button>
+      <div class="pmenu" id="notif-menu" style="width:280px;">
+        <div class="pmenu-head"><div class="pmenu-name">Notifications</div></div>
+        <div id="notif-list" style="max-height:300px;overflow-y:auto;"></div>
+      </div>
+    </div>
+    <div class="profile-wrap">
+      <div class="ava" id="profile-avatar" role="button" tabindex="0" aria-label="Account menu" onclick="toggleProfileMenu(event)" onkeydown="if(event.key==='Enter'||event.key===' '){event.preventDefault();toggleProfileMenu(event);}"><img src="https://api.dicebear.com/7.x/avataaars/svg?seed=Asgard" alt="" aria-hidden="true"></div>
+      <div class="pmenu" id="pmenu">
+        <div class="pmenu-head">
+          <div class="pmenu-name" id="pmenu-name">—</div>
+          <div class="pmenu-role" id="pmenu-role"></div>
+        </div>
+        <button class="pmenu-item" onclick="sv('settings');closeProfileMenu();">
+          <svg viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2"><circle cx="12" cy="12" r="3"/><path d="M19.4 15a1.65 1.65 0 0 0 .33 1.82l.06.06a2 2 0 0 1-2.83 2.83l-.06-.06a1.65 1.65 0 0 0-1.82-.33 1.65 1.65 0 0 0-1 1.51V21a2 2 0 0 1-4 0v-.09A1.65 1.65 0 0 0 9 19.4a1.65 1.65 0 0 0-1.82.33l-.06.06a2 2 0 0 1-2.83-2.83l.06-.06A1.65 1.65 0 0 0 4.68 15a1.65 1.65 0 0 0-1.51-1H3a2 2 0 0 1 0-4h.09A1.65 1.65 0 0 0 4.6 9a1.65 1.65 0 0 0-.33-1.82l-.06-.06a2 2 0 0 1 2.83-2.83l.06.06A1.65 1.65 0 0 0 9 4.68a1.65 1.65 0 0 0 1-1.51V3a2 2 0 0 1 4 0v.09a1.65 1.65 0 0 0 1 1.51 1.65 1.65 0 0 0 1.82-.33l.06-.06a2 2 0 0 1 2.83 2.83l-.06.06A1.65 1.65 0 0 0 19.4 9a1.65 1.65 0 0 0 1.51 1H21a2 2 0 0 1 0 4h-.09a1.65 1.65 0 0 0-1.51 1z"/></svg>
+          Settings
+        </button>
+        <button class="pmenu-item danger" onclick="logout()">
+          <svg viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2"><path d="M9 21H5a2 2 0 0 1-2-2V5a2 2 0 0 1 2-2h4"/><polyline points="16 17 21 12 16 7"/><line x1="21" y1="12" x2="9" y2="12"/></svg>
+          Sign out
+        </button>
+      </div>
+    </div>
+  </div>
+</header>
+
+<!-- ═══ LOGIN OVERLAY ═══ -->
+<div class="login-overlay" id="login-overlay" style="display:none;">
+  <div class="login-box">
+    <div class="login-brand">
+      <svg viewBox="-150 -175 300 400" fill="none" aria-label="Asgard">
+        <path d="M0 -150 L120 -90 L120 70 Q120 150 0 200 Q-120 150 -120 70 L-120 -90 Z" fill="none" stroke="#F0A500" stroke-width="14" stroke-linejoin="round"/>
+        <polyline points="-70,40 -25,-10 10,30 70,-50" fill="none" stroke="#4B9DFF" stroke-width="14" stroke-linecap="round" stroke-linejoin="round"/>
+        <polyline points="40,-50 70,-50 70,-20" fill="none" stroke="#4B9DFF" stroke-width="14" stroke-linecap="round" stroke-linejoin="round"/>
+      </svg>
+    </div>
+    <div class="login-title">Asgard</div>
+    <div class="login-sub">Intelligence — sign in to continue</div>
+    <label class="login-label">Username</label>
+    <input class="login-input" id="login-user" autocomplete="username" placeholder="username">
+    <label class="login-label">Password</label>
+    <input class="login-input" id="login-pass" type="password" autocomplete="current-password" placeholder="••••••••">
+    <div class="login-err" id="login-err"></div>
+    <button class="savebtn" style="margin-top:4px;" onclick="doLogin()">Sign in</button>
+  </div>
+</div>
+
+<div class="toast" id="toast"></div>
+
+<!-- ═══ PIN MODAL ═══ -->
+<div class="pin-overlay" id="pin-modal" style="display:none;" onclick="if(event.target===this)closePinModal()">
+  <div class="pin-box">
+    <div class="pin-title">Confirm Agent Activation</div>
+    <div style="margin-bottom:10px;">
+      <span class="pin-agent-tag" id="pin-agent-tag">Loki Pro</span>
+    </div>
+    <div class="pin-sub">Type the confirmation code below to authorise this agent to begin trading. This is a deliberate confirmation step, not an authentication factor.</div>
+    <div class="pin-display" id="pin-display">----</div>
+    <div class="pin-label">Enter code to confirm</div>
+    <input class="pin-input" id="pin-input" maxlength="4" placeholder="· · · ·" type="text" inputmode="numeric" autocomplete="off" aria-label="Confirmation code">
+    <div class="pin-err" id="pin-err"></div>
+    <div style="display:flex;gap:8px;margin-top:16px;">
+      <button class="savebtn" style="margin-top:0;" onclick="confirmPin()">Confirm &amp; Activate</button>
+      <button class="dangbtn" onclick="closePinModal()">Cancel</button>
+    </div>
+  </div>
+</div>
+
+<!-- ═══ MAIN ═══ -->
+<main class="main">
+
+<!-- ── TRADE ── -->
+<div class="view on" id="v-trade">
+  <div class="vh">
+    <div class="vt">System <em>Intelligence</em> Overview</div>
+    <div class="vs">AI-powered market analysis — monitoring global assets with sub-second precision.</div>
+  </div>
+
+  <div class="ticks">
+    <div class="tick on" id="tk-BTCUSDT" data-be="BTCUSDT" onclick="selTick(this,'BTCUSDT')">
+      <div class="tick-top"><div class="tick-sym">BTC<small>/USDT</small></div><div class="chg">—</div></div>
+      <div class="tick-price">—</div>
+      <div class="tick-hl"><span class="tk-h">H: —</span><span class="tk-l">L: —</span></div>
+    </div>
+    <div class="tick" id="tk-ETHUSDT" data-be="ETHUSDT" onclick="selTick(this,'ETHUSDT')">
+      <div class="tick-top"><div class="tick-sym">ETH<small>/USDT</small></div><div class="chg">—</div></div>
+      <div class="tick-price">—</div>
+      <div class="tick-hl"><span class="tk-h">H: —</span><span class="tk-l">L: —</span></div>
+    </div>
+    <div class="tick" id="tk-EUR_USD" data-be="EUR_USD" onclick="selTick(this,'EUR_USD')">
+      <div class="tick-top"><div class="tick-sym">EUR<small>/USD</small></div><div class="chg">—</div></div>
+      <div class="tick-price">—</div>
+      <div class="tick-hl"><span class="tk-h">H: —</span><span class="tk-l">L: —</span></div>
+    </div>
+    <div class="tick" id="tk-XAU_USD" data-be="XAU_USD" onclick="selTick(this,'XAU_USD')">
+      <div class="tick-top"><div class="tick-sym">XAU<small>/USD</small></div><div class="chg">—</div></div>
+      <div class="tick-price">—</div>
+      <div class="tick-hl"><span class="tk-h">H: —</span><span class="tk-l">L: —</span></div>
+    </div>
+  </div>
+
+  <div class="tlayout">
+
+    <!-- ── LEFT: Chart + AI Signals ── -->
+    <div class="chart-col">
+      <div class="chart-card">
+        <div class="chart-hdr">
+          <div>
+            <div class="chart-sym" id="csym">BTCUSDT <span>Market Sentiment</span></div>
+            <div class="chart-live">
+              <span class="cprice" id="cprice">$67,420.50</span>
+              <span class="cpct" id="cpct">▲ 2.34%</span>
+            </div>
+          </div>
+          <div class="chart-controls">
+            <div class="tfs">
+              <button class="tf" onclick="setTF(this)">1H</button>
+              <button class="tf on" onclick="setTF(this)">1D</button>
+              <button class="tf" onclick="setTF(this)">1W</button>
+            </div>
+            <div class="ctypes">
+              <button class="ct-btn on" id="ct-line" onclick="setChartType('line')">Line</button>
+              <button class="ct-btn" id="ct-candle" onclick="setChartType('candle')">Candle</button>
+            </div>
+          </div>
+        </div>
+        <div class="chart-wrap" id="cwrap">
+          <div class="ctip" id="ctip"><div class="ctip-d" id="ctipd"></div><div class="ctip-p" id="ctipp"></div></div>
+          <svg class="chart-svg" id="csvg" viewBox="0 0 900 260" preserveAspectRatio="none">
+            <defs>
+              <linearGradient id="cg" x1="0" y1="0" x2="0" y2="1">
+                <stop offset="0%" stop-color="#4B9DFF" stop-opacity="0.16"/>
+                <stop offset="85%" stop-color="#4B9DFF" stop-opacity="0"/>
+              </linearGradient>
+            </defs>
+            <g id="cgrid"></g>
+            <path id="carea" fill="url(#cg)"/>
+            <path id="cline" fill="none" stroke="#4B9DFF" stroke-width="2" stroke-linecap="round" stroke-linejoin="round"/>
+            <g id="ccandles"></g>
+            <line id="ccurr" stroke="#22C55E" stroke-width="1" stroke-dasharray="5,4" opacity="0.45"/>
+            <g id="ctrades"></g>
+            <line id="cvl" stroke="rgba(255,255,255,0.18)" stroke-width="1" stroke-dasharray="3,3" display="none"/>
+            <line id="chl" stroke="rgba(255,255,255,0.18)" stroke-width="1" stroke-dasharray="3,3" display="none"/>
+            <circle id="cdot" r="4.5" fill="#fff" stroke="#4B9DFF" stroke-width="2" display="none"/>
+            <g id="cylbls" font-size="9" fill="#445060" font-family="JetBrains Mono,monospace"></g>
+          </svg>
+        </div>
+      </div>
+
+      <!-- AI Signals — below chart -->
+      <div class="sc">
+        <div class="sh">
+          <div class="ct" style="margin-bottom:0">
+            <span class="ic icp"><svg viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2"><path d="M12 2a10 10 0 1 0 10 10"/><path d="M12 6v6l4 2"/><path d="M22 2 12 12"/></svg></span>
+            AI Signals
+          </div>
+          <div class="lbadge"><span class="d"></span>Live</div>
+        </div>
+        <div id="sigbox">
+          <div style="font-size:11.5px;color:var(--t3);padding:18px 4px;text-align:center;line-height:1.6;">Waiting for live AI signals…<br><span style="font-size:10px;">Activate an agent to start generating predictions.</span></div>
+        </div>
+      </div>
+    </div>
+
+    <!-- ── RIGHT: Agent Control + Trade History ── -->
+    <div class="tpanel">
+
+      <!-- AI Agent Selector -->
+      <div class="tc" id="agent-panel">
+        <div class="ct">
+          <span class="ic icp"><svg viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2"><circle cx="12" cy="12" r="3"/><path d="M12 1v4M12 19v4M4.22 4.22l2.83 2.83M16.95 16.95l2.83 2.83M1 12h4M19 12h4M4.22 19.78l2.83-2.83M16.95 7.05l2.83-2.83"/></svg></span>
+          AI Agent Control
+        </div>
+
+        <div style="font-size:10px;color:var(--t3);line-height:1.5;margin-bottom:10px;">
+          Only one agent runs live at a time. <b style="color:var(--blue)">Loki</b> uses a single pillar,
+          <b style="color:var(--pu)">Thor</b> blends all three equally, <b style="color:var(--gold)">Odin</b> self-learns the weights.
+        </div>
+
+        <!-- Loki — single pillar (Math / Patterns / Trends) -->
+        <div class="agent-row" data-agent="loki" id="row-loki" style="flex-wrap:wrap;">
+          <div style="display:flex;align-items:center;width:100%;gap:8px;">
+            <div class="agent-info">
+              <div class="agent-name" style="color:var(--blue)">Loki</div>
+              <div class="agent-tag">Single pillar · pick one</div>
+            </div>
+            <div class="agent-status inactive" id="status-loki">INACTIVE</div>
+            <button class="act-btn inactive" id="actbtn-loki" onclick="requestActivateLoki()">Activate</button>
+          </div>
+          <div class="loki-pills">
+            <div class="loki-pill on" data-pillar="loki_m" onclick="selectLokiPillar('loki_m')">Math</div>
+            <div class="loki-pill" data-pillar="loki_p" onclick="selectLokiPillar('loki_p')">Patterns</div>
+            <div class="loki-pill" data-pillar="loki_t" onclick="selectLokiPillar('loki_t')">Trends</div>
+          </div>
+        </div>
+
+        <div class="agent-row" data-agent="thor" id="row-thor">
+          <div class="agent-info">
+            <div class="agent-name" style="color:var(--pu)">Thor</div>
+            <div class="agent-tag">Math + Patterns + Trends ÷ 3</div>
+          </div>
+          <div class="agent-status inactive" id="status-thor">INACTIVE</div>
+          <button class="act-btn inactive" id="actbtn-thor" onclick="requestActivate('thor')">Activate</button>
+        </div>
+
+        <div class="agent-row" data-agent="odin" id="row-odin">
+          <div class="agent-info">
+            <div class="agent-name" style="color:var(--gold)">Odin</div>
+            <div class="agent-tag">Self-learning · adaptive weights</div>
+          </div>
+          <div class="agent-status inactive" id="status-odin">INACTIVE</div>
+          <button class="act-btn inactive" id="actbtn-odin" onclick="requestActivate('odin')">Activate</button>
+        </div>
+      </div>
+
+      <!-- Trade History -->
+      <div class="tc">
+        <div class="ct">
+          <span class="ic icb"><svg viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2"><path d="M14 2H6a2 2 0 0 0-2 2v16a2 2 0 0 0 2 2h12a2 2 0 0 0 2-2V8z"/><polyline points="14 2 14 8 20 8"/></svg></span>
+          Recent Trades
+        </div>
+        <div class="trade-hist-scroll">
+          <div id="trade-hist-body"></div>
+        </div>
+      </div>
+
+    </div>
+  </div>
+</div>
+
+<!-- ── STATS ── -->
+<div class="view" id="v-stats">
+  <div class="vh"><div class="vt">Performance <em>Stats</em></div><div class="vs">Historical equity curves, win rates, and RL strategy allocation models.</div></div>
+  <div class="kgrid">
+    <div class="kpi"><div class="kl">Total Profit (Daily)</div><div class="kv g" id="kpi-profit">—</div><div class="ks" id="kpi-profit-sub">No closed trades today</div></div>
+    <div class="kpi"><div class="kl">Avg Win Rate</div><div class="kv b" id="kpi-winrate">—</div><div class="ks" id="kpi-winrate-sub">Across all agents</div></div>
+    <div class="kpi"><div class="kl">Profit Factor</div><div class="kv p" id="kpi-pf">—</div><div class="ks" id="kpi-pf-sub">Gross win / gross loss</div></div>
+    <div class="kpi"><div class="kl">Max Drawdown</div><div class="kv r" id="kpi-dd">—</div><div class="ks" id="kpi-dd-sub">From peak equity</div></div>
+  </div>
+  <div class="slayout">
+    <div class="card cp">
+      <div class="ct">
+        <span class="ic icb"><svg viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2"><polyline points="22 12 18 12 15 21 9 3 6 12 2 12"/></svg></span>
+        Comparative RL Backtest — 30D
+      </div>
+      <div style="display:flex;gap:14px;margin-bottom:12px;font-size:11px;color:var(--t2);">
+        <span style="display:flex;align-items:center;gap:5px;"><span style="width:18px;height:2px;background:var(--blue);border-radius:2px;display:inline-block"></span>Loki</span>
+        <span style="display:flex;align-items:center;gap:5px;"><span style="width:18px;height:2px;background:var(--pu);border-radius:2px;display:inline-block"></span>Thor</span>
+        <span style="display:flex;align-items:center;gap:5px;"><span style="width:18px;height:2px;background:var(--gold);border-radius:2px;display:inline-block"></span>Odin</span>
+        <span id="stats-empty" class="hide" style="margin-left:auto;color:var(--t3);">No closed trades yet</span>
+      </div>
+      <svg viewBox="0 0 600 180" style="width:100%;display:block;overflow:visible">
+        <defs>
+          <linearGradient id="lg" x1="0" y1="0" x2="0" y2="1">
+            <stop offset="0%" stop-color="#4B9DFF" stop-opacity="0.14"/>
+            <stop offset="100%" stop-color="#4B9DFF" stop-opacity="0"/>
+          </linearGradient>
+        </defs>
+        <line x1="0" y1="45" x2="600" y2="45" stroke="rgba(255,255,255,0.04)" stroke-width="1"/>
+        <line x1="0" y1="90" x2="600" y2="90" stroke="rgba(255,255,255,0.04)" stroke-width="1"/>
+        <line x1="0" y1="135" x2="600" y2="135" stroke="rgba(255,255,255,0.04)" stroke-width="1"/>
+        <path id="sla" fill="url(#lg)"/>
+        <path id="sl1" fill="none" stroke="#4B9DFF" stroke-width="2" stroke-linecap="round"/>
+        <path id="sl2" fill="none" stroke="#9B72FF" stroke-width="2" stroke-linecap="round"/>
+        <path id="sl3" fill="none" stroke="#F0A500" stroke-width="2" stroke-linecap="round"/>
+      </svg>
+    </div>
+    <div class="card cp">
+      <div class="ct"><span class="ic icg"><svg viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2"><rect x="3" y="4" width="18" height="18" rx="2"/><line x1="16" y1="2" x2="16" y2="6"/><line x1="8" y1="2" x2="8" y2="6"/><line x1="3" y1="10" x2="21" y2="10"/></svg></span>Agent Breakdown</div>
+      <div class="alist" id="agent-breakdown">
+        <div style="font-size:11px;color:var(--t3);padding:6px 0;">Loading agent performance…</div>
+      </div>
+      <div style="margin-top:13px;padding:11px 13px;background:var(--gr-bg);border:1px solid var(--gr-bd);border-radius:var(--rs);" id="macro-card">
+        <div style="font-size:9px;font-weight:700;color:var(--gr);text-transform:uppercase;letter-spacing:.07em;margin-bottom:3px;" id="macro-label">Macro Status</div>
+        <div style="font-size:11px;color:var(--t2);line-height:1.55;" id="macro-status">Self-learning loops operating at standard capacity.</div>
+      </div>
+    </div>
+  </div>
+
+  <!-- Backtest runner -->
+  <div class="card cp" style="margin-top:12px;">
+    <div class="ct"><span class="ic icp"><svg viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2"><path d="M3 3v18h18"/><path d="m19 9-5 5-4-4-3 3"/></svg></span>Strategy Backtest</div>
+    <div style="display:grid;grid-template-columns:repeat(4,1fr) auto;gap:9px;align-items:end;margin-bottom:14px;">
+      <div class="fl" style="margin:0;"><label>Symbol</label><select id="bt-symbol"><option value="XAU_USD">XAU/USD</option><option value="EUR_USD">EUR/USD</option><option value="XAG_USD">XAG/USD</option><option value="BTCUSDT">BTC/USDT</option></select></div>
+      <div class="fl" style="margin:0;"><label>Agent</label><select id="bt-agent"><option value="loki_m">Loki · Math</option><option value="loki_p">Loki · Patterns</option><option value="loki_t">Loki · Trends</option><option value="thor">Thor</option><option value="odin">Odin</option></select></div>
+      <div class="fl" style="margin:0;"><label>Days (7–365)</label><input class="kinput mono" id="bt-days" type="number" value="90" min="7" max="365"></div>
+      <div class="fl" style="margin:0;"><label>Capital (USD)</label><input class="kinput mono" id="bt-capital" type="number" value="10000" min="100" step="500"></div>
+      <button class="savebtn" style="margin:0;width:auto;padding:9px 18px;" id="bt-run" onclick="runBacktest()">Run</button>
+    </div>
+    <div id="bt-status" style="font-size:11px;color:var(--t3);margin-bottom:10px;">Configure a strategy and run an event-driven backtest against historical candles.</div>
+    <div id="bt-results" class="hide">
+      <div class="kgrid" style="grid-template-columns:repeat(6,1fr);margin-bottom:12px;">
+        <div class="kpi"><div class="kl">Total Return</div><div class="kv" id="bt-return">—</div></div>
+        <div class="kpi"><div class="kl">Sharpe</div><div class="kv b" id="bt-sharpe">—</div></div>
+        <div class="kpi"><div class="kl">Max DD</div><div class="kv r" id="bt-dd">—</div></div>
+        <div class="kpi"><div class="kl">Win Rate</div><div class="kv p" id="bt-wr">—</div></div>
+        <div class="kpi"><div class="kl">Profit Factor</div><div class="kv" id="bt-pf">—</div></div>
+        <div class="kpi"><div class="kl">Trades</div><div class="kv" id="bt-trades">—</div></div>
+      </div>
+      <svg viewBox="0 0 600 160" style="width:100%;display:block;overflow:visible">
+        <defs><linearGradient id="btg" x1="0" y1="0" x2="0" y2="1"><stop offset="0%" stop-color="#9B72FF" stop-opacity="0.16"/><stop offset="100%" stop-color="#9B72FF" stop-opacity="0"/></linearGradient></defs>
+        <path id="bt-area" fill="url(#btg)"/>
+        <path id="bt-line" fill="none" stroke="#9B72FF" stroke-width="2" stroke-linecap="round"/>
+      </svg>
+    </div>
+  </div>
+</div>
+
+<!-- ── ACTIVITY ── -->
+<div class="view" id="v-activity">
+  <div class="vh"><div class="vt">Live <em>Activity</em></div><div class="vs">Currently open positions and real-time trade logs.</div></div>
+  <div class="card cp" style="margin-bottom:12px;">
+    <div class="ct"><span class="ic icb"><svg viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2"><polyline points="22 12 18 12 15 21 9 3 6 12 2 12"/></svg></span>Active Open Positions</div>
+    <table>
+      <thead><tr><th>Asset</th><th>Side</th><th>Size</th><th>Entry</th><th>Current</th><th>Unrealized PnL</th><th></th></tr></thead>
+      <tbody id="open-pos-body"></tbody>
+    </table>
+  </div>
+  <div class="card cp">
+    <div style="display:flex;justify-content:space-between;align-items:center;margin-bottom:13px;">
+      <div class="ct" style="margin-bottom:0"><span class="ic icb"><svg viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2"><path d="M14 2H6a2 2 0 0 0-2 2v16a2 2 0 0 0 2 2h12a2 2 0 0 0 2-2V8z"/><polyline points="14 2 14 8 20 8"/></svg></span>Completed Trade History</div>
+      <div style="display:flex;gap:7px;">
+        <input id="hist-search" oninput="applyHistFilter()" style="background:var(--s2);border:1px solid var(--bd);border-radius:var(--rp);padding:5px 12px;font-size:11px;color:var(--t1);outline:none;width:130px;" placeholder="Search asset…">
+        <select id="hist-agent" onchange="applyHistFilter()" style="background:var(--s2);border:1px solid var(--bd);border-radius:var(--rp);padding:5px 11px;font-size:11px;color:var(--t1);outline:none;cursor:pointer;">
+          <option value="">All Agents</option><option value="loki">Loki</option><option value="thor">Thor</option><option value="odin">Odin</option>
+        </select>
+      </div>
+    </div>
+    <table>
+      <thead><tr><th>Time</th><th>Asset</th><th>Side</th><th>Agent</th><th>Entry</th><th>Close</th><th style="text-align:right">Net PnL</th></tr></thead>
+      <tbody id="completed-body"></tbody>
+    </table>
+  </div>
+
+  <div class="card cp" style="margin-top:12px;">
+    <div class="ct"><span class="ic icr"><svg viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2"><path d="M12 2a10 10 0 1 0 10 10"/><path d="M12 6v6l4 2"/></svg></span>Audit Log</div>
+    <div style="font-size:10.5px;color:var(--t3);margin-bottom:12px;">Append-only record of execution-critical events — orders, kill-switch changes, and live-mode toggles.</div>
+    <table>
+      <thead><tr><th>Time</th><th>Event</th><th>Broker</th><th>Asset</th><th>Detail</th></tr></thead>
+      <tbody id="audit-body"></tbody>
+    </table>
+  </div>
+</div>
+
+<!-- ── SETTINGS ── -->
+<div class="view" id="v-settings">
+  <div class="vh"><div class="vt">System <em>Settings</em></div><div class="vs">Manage execution, your API keys, users, and Gemini API usage.</div></div>
+  <div class="slout">
+    <div style="display:flex;flex-direction:column;gap:12px;">
+      <!-- Safety Controls -->
+      <div class="rccard" id="card-safety">
+        <div class="ct"><span class="ic icr"><svg viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2"><path d="M12 9v4M12 17h.01M10.29 3.86 1.82 18a2 2 0 0 0 1.71 3h16.94a2 2 0 0 0 1.71-3L13.71 3.86a2 2 0 0 0-3.42 0z"/></svg></span>Safety Controls</div>
+        <div class="trow"><div><div class="tname">Live (real-money) mode</div><div class="tdesc">When on, the engine routes orders to your connected broker with real funds. Requires an active broker connection.</div></div><label class="tog"><input type="checkbox" id="set-livemode" onchange="toggleLiveMode(event)"><span class="tknob"></span></label></div>
+        <div class="trow"><div><div class="tname" style="color:var(--re)">My kill switch</div><div class="tdesc">Immediately halt all automated trading for your account. Open positions are unaffected.</div></div><label class="tog"><input type="checkbox" id="set-killswitch" onchange="toggleKillSwitch(event)"><span class="tknob"></span></label></div>
+        <div class="trow hide" id="row-global-kill" style="margin-bottom:0;border-color:var(--re-bd);"><div><div class="tname" style="color:var(--re)">Global kill switch <span class="kbadge no" style="margin-left:4px;">Admin</span></div><div class="tdesc">Halt real-money execution for <b>every</b> user on the platform.</div></div><label class="tog"><input type="checkbox" id="set-globalkill" onchange="toggleGlobalKill(event)"><span class="tknob"></span></label></div>
+        <div id="safety-banner" class="hide" style="margin-top:11px;padding:9px 12px;background:var(--re-bg);border:1px solid var(--re-bd);border-radius:var(--rs);font-size:11px;color:var(--re);font-weight:600;"></div>
+      </div>
+
+      <div class="card cp">
+        <div class="ct"><span class="ic icb"><svg viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2"><rect x="2" y="3" width="20" height="14" rx="2"/><polyline points="8 21 12 17 16 21"/><line x1="12" y1="17" x2="12" y2="21"/></svg></span>Automatic Execution</div>
+        <div class="trow"><div><div class="tname">System Auto Mode</div><div class="tdesc">Enables automatic trade execution based on AI recommendations.</div></div><label class="tog"><input type="checkbox" id="set-auto" onchange="toggleAuto()"><span class="tknob"></span></label></div>
+        <div class="trow"><div><div class="tname">Engine Enabled</div><div class="tdesc">When off, the active agent stops evaluating and trading.</div></div><label class="tog"><input type="checkbox" id="set-engine" checked onchange="toggleEngine()"><span class="tknob"></span></label></div>
+      </div>
+
+      <!-- API Keys -->
+      <div class="card cp">
+        <div class="ct"><span class="ic icgold"><svg viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2"><path d="M21 2l-2 2m-7.61 7.61a5.5 5.5 0 1 1-7.778 7.778 5.5 5.5 0 0 1 7.777-7.777zm0 0L15.5 7.5m0 0l3 3L22 7l-3-3m-3.5 3.5L19 4"/></svg></span>API Keys</div>
+        <div style="font-size:10.5px;color:var(--t3);line-height:1.5;margin-bottom:12px;">Your keys are encrypted at rest. Existing keys show as <span class="kbadge ok">Configured</span> and are never displayed. Leave a field blank to keep it unchanged.</div>
+
+        <div class="fl"><label>Gemini API Key <span class="kbadge no" id="kb-gemini">Not set</span></label><input class="kinput" id="key-gemini" type="password" placeholder="AIza..."></div>
+        <div style="height:1px;background:var(--bd);margin:6px 0 12px;"></div>
+        <div class="fl"><label>Binance API Key <span class="kbadge no" id="kb-crypto">Not set</span></label><input class="kinput" id="key-binance" type="password" placeholder="Binance key"></div>
+        <div class="fl"><label>Binance Secret Key</label><input class="kinput" id="key-binance-secret" type="password" placeholder="Binance secret"></div>
+        <div style="height:1px;background:var(--bd);margin:6px 0 12px;"></div>
+        <div class="fl"><label>OANDA API Key <span class="kbadge no" id="kb-forex">Not set</span></label><input class="kinput" id="key-oanda" type="password" placeholder="OANDA token"></div>
+        <div class="fl"><label>OANDA Account ID</label><input class="kinput" id="key-oanda-acc" placeholder="xxx-xxx-xxxxxxx-xxx"></div>
+        <div class="fl"><label>OANDA Environment</label><select id="key-oanda-env"><option value="practice">practice</option><option value="live">live</option></select></div>
+        <button class="savebtn" onclick="saveKeys()">Save API Keys</button>
+      </div>
+
+      <!-- Broker Connections (per-user) -->
+      <div class="card cp">
+        <div class="ct"><span class="ic icg"><svg viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2"><path d="M4 7h16M4 7a2 2 0 0 1 2-2h12a2 2 0 0 1 2 2M4 7v10a2 2 0 0 0 2 2h12a2 2 0 0 0 2-2V7M9 11h6"/></svg></span>Broker Connections</div>
+        <div style="font-size:10.5px;color:var(--t3);line-height:1.5;margin-bottom:12px;">Connect your own broker to enable live trading. Keys are encrypted at rest and never displayed. An active connection is required before live mode can be enabled.</div>
+        <div id="broker-list" style="margin-bottom:12px;"></div>
+        <div style="height:1px;background:var(--bd);margin:4px 0 12px;"></div>
+        <div style="font-size:10px;font-weight:700;color:var(--t3);text-transform:uppercase;letter-spacing:.07em;margin-bottom:8px;">Add Connection</div>
+        <div class="fl"><label>Broker</label><select id="bk-broker" onchange="onBrokerSelect()"><option value="oanda">OANDA (forex / metals)</option><option value="binance">Binance (crypto)</option><option value="coinbase">Coinbase (crypto)</option></select></div>
+        <div class="fl"><label>Environment</label><select id="bk-env"><option value="practice">practice</option><option value="live">live</option></select></div>
+        <div class="fl"><label>API Key</label><input class="kinput" id="bk-key" type="password" placeholder="API key / token"></div>
+        <div class="fl" id="bk-secret-wrap"><label>API Secret</label><input class="kinput" id="bk-secret" type="password" placeholder="API secret"></div>
+        <div class="fl" id="bk-acc-wrap"><label>Account ID</label><input class="kinput" id="bk-acc" placeholder="xxx-xxx-xxxxxxx-xxx"></div>
+        <button class="savebtn" onclick="saveBroker()">Add Broker Connection</button>
+      </div>
+
+      <!-- User Management (admin only) -->
+      <div class="card cp hide" id="card-usermgmt">
+        <div class="ct"><span class="ic icb"><svg viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2"><path d="M17 21v-2a4 4 0 0 0-4-4H5a4 4 0 0 0-4 4v2"/><circle cx="9" cy="7" r="4"/><path d="M23 21v-2a4 4 0 0 0-3-3.87M16 3.13a4 4 0 0 1 0 7.75"/></svg></span>User Management</div>
+        <div id="user-list" style="margin-bottom:12px;"></div>
+        <div style="height:1px;background:var(--bd);margin:4px 0 12px;"></div>
+        <div style="font-size:10px;font-weight:700;color:var(--t3);text-transform:uppercase;letter-spacing:.07em;margin-bottom:8px;">Create New User</div>
+        <div class="fl"><label>Username</label><input class="kinput" id="nu-name" placeholder="username"></div>
+        <div class="fl"><label>Password</label><input class="kinput" id="nu-pass" type="password" placeholder="temporary password"></div>
+        <div class="trow" style="margin-bottom:0;"><div><div class="tname">Administrator</div><div class="tdesc">Can create users and manage system keys.</div></div><label class="tog"><input type="checkbox" id="nu-admin"><span class="tknob"></span></label></div>
+        <button class="savebtn" onclick="createUser()">Create User</button>
+      </div>
+    </div>
+
+    <div style="display:flex;flex-direction:column;gap:12px;">
+      <!-- Gemini Usage & Limits (admin only) -->
+      <div class="card cp hide" id="card-gemini">
+        <div class="ct"><span class="ic icp"><svg viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2"><path d="M12 2a10 10 0 1 0 10 10"/><path d="M12 6v6l4 2"/></svg></span>Gemini API Usage</div>
+        <div style="display:flex;justify-content:space-between;align-items:baseline;">
+          <span style="font-size:11px;color:var(--t2);">Calls today</span>
+          <span class="mono fw7" style="font-size:15px;"><span id="usage-calls">0</span> / <span id="usage-cap-lbl">1500</span></span>
+        </div>
+        <div class="usage-bar"><div class="usage-fill" id="usage-fill" style="width:0%"></div></div>
+        <div style="height:1px;background:var(--bd);margin:10px 0 12px;"></div>
+        <div class="fl"><label>Daily Call Cap</label><input class="kinput" id="cfg-cap" type="number" min="1" step="50"></div>
+        <div class="fl"><label>Min Seconds Between Calls</label><input class="kinput" id="cfg-interval" type="number" min="1" step="1"></div>
+        <div class="fl"><label>News Scan Interval (seconds)</label><input class="kinput" id="cfg-news" type="number" min="10" step="5"></div>
+        <button class="savebtn" onclick="saveLimits()">Save Limits</button>
+      </div>
+
+      <div class="rccard" style="border-color:var(--gold-bd);">
+        <div class="ct"><span class="ic icgold"><svg viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2"><path d="M12 2L2 7l10 5 10-5-10-5z"/><path d="M2 17l10 5 10-5"/><path d="M2 12l10 5 10-5"/></svg></span>Start Simulator</div>
+        <div class="rwarn" style="color:var(--t2);">Launch a sandboxed environment that trains Odin using live market data. All agents run in parallel — review performance, compare what-if Loki/Thor scenarios, and track win rates before going live.</div>
+        <div class="fl"><label>Starting Capital (USD)</label><input class="kinput mono" id="sim-capital" type="number" value="100000" step="1000" min="1000"></div>
+        <button class="savebtn" style="background:var(--gold);box-shadow:none;" onclick="launchSimulator()">Launch Simulator</button>
+      </div>
+
+      <!-- Paper wallet reset -->
+      <div class="card cp">
+        <div class="ct"><span class="ic icg"><svg viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2"><path d="M21 12a9 9 0 1 1-3-6.7L21 8"/><path d="M21 3v5h-5"/></svg></span>Reset Paper Wallet</div>
+        <div style="font-size:10.5px;color:var(--t3);line-height:1.5;margin-bottom:10px;">Reset your paper-trading balance and clear open paper positions. Does not affect live broker funds.</div>
+        <div class="fl"><label>New Balance (USD)</label><input class="kinput mono" id="reset-amount" type="number" value="100000" step="1000" min="1000"></div>
+        <button class="savebtn" onclick="resetWallet()">Reset Wallet</button>
+      </div>
+
+      <!-- Privacy & Data (GDPR) -->
+      <div class="rccard">
+        <div class="ct"><span class="ic icr"><svg viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2"><path d="M12 22s8-4 8-10V5l-8-3-8 3v7c0 6 8 10 8 10z"/></svg></span>Privacy &amp; Data</div>
+        <div class="rwarn" style="color:var(--t2);">Export a copy of all personal data we hold for your account, or permanently erase your account (GDPR Art. 17). Erasure removes broker keys, closes paper positions, and anonymises your profile — it cannot be undone.</div>
+        <button class="savebtn" style="background:var(--s3);box-shadow:none;margin-top:0;" onclick="exportData()">Export My Data</button>
+        <button class="dangbtn" style="margin-top:10px;" onclick="deleteAccount()">Delete My Account</button>
+      </div>
+    </div>
+  </div>
+</div>
+
+</main>
+
+<script src="/static/app.js" defer></script>
+</body>
+</html>

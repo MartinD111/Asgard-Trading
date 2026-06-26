@@ -1,20 +1,27 @@
 from fastapi import APIRouter, Depends, HTTPException
 from pydantic import BaseModel, field_validator
-from typing import Literal
 from routers.auth import get_current_user
+from services.signals import SELECTABLE_AGENTS, DEFAULT_AGENT
 
 router = APIRouter(prefix="/api/backtest", tags=["Backtest"])
 
 VALID_SYMBOLS = {"EUR_USD", "XAU_USD", "XAG_USD", "BTCUSDT"}
-VALID_AGENTS = {"loki", "thor", "odin"}
+VALID_AGENTS = set(SELECTABLE_AGENTS)
 MAX_CURVE_POINTS = 300
 
 
 class BacktestRequest(BaseModel):
     symbol: str = "XAU_USD"
     days: int = 90
-    agent: Literal["loki", "thor", "odin"] = "loki"
+    agent: str = DEFAULT_AGENT
     initial_capital: float = 10_000.0
+
+    @field_validator("agent")
+    @classmethod
+    def agent_valid(cls, v: str) -> str:
+        if v not in VALID_AGENTS:
+            raise ValueError(f"agent must be one of {sorted(VALID_AGENTS)}")
+        return v
 
     @field_validator("symbol")
     @classmethod

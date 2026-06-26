@@ -18,8 +18,10 @@ class ConfigUpdate(BaseModel):
     key: str
     value: str
 
+from services.signals import SELECTABLE_AGENTS as VALID_AGENTS, DEFAULT_AGENT
+
 class AlgorithmSettings(BaseModel):
-    active_agent: str = "loki"   # loki | thor | odin
+    active_agent: str = DEFAULT_AGENT   # loki_m | loki_p | loki_t | thor | odin
     engine_active: bool = True
     auto_kelly: bool = True
     kelly_percent: float = 1.0
@@ -77,22 +79,26 @@ async def _set_cfg(db: AsyncSession, key: str, value: str):
 @router.get("/keys")
 async def get_api_keys(_: dict = Depends(get_current_admin), db: AsyncSession = Depends(get_db)):
     """Returns masked presence of each key group — never the raw secrets."""
-    gemini = await _get_cfg(db, "GEMINI_API_KEY")
-    oanda = await _get_cfg(db, "OANDA_API_KEY")
-    oanda_acc = await _get_cfg(db, "OANDA_ACCOUNT_ID")
-    oanda_env = await _get_cfg(db, "OANDA_ENVIRONMENT")
-    binance = await _get_cfg(db, "BINANCE_API_KEY")
-    binance_sec = await _get_cfg(db, "BINANCE_SECRET_KEY")
+    gemini = (await _get_cfg(db, "GEMINI_API_KEY")) or os.getenv("GEMINI_API_KEY")
+    oanda = (await _get_cfg(db, "OANDA_API_KEY")) or os.getenv("OANDA_API_KEY")
+    oanda_acc = (await _get_cfg(db, "OANDA_ACCOUNT_ID")) or os.getenv("OANDA_ACCOUNT_ID")
+    oanda_env = (await _get_cfg(db, "OANDA_ENVIRONMENT")) or os.getenv("OANDA_ENVIRONMENT")
+    binance = (await _get_cfg(db, "BINANCE_API_KEY")) or os.getenv("BINANCE_API_KEY")
+    binance_sec = (await _get_cfg(db, "BINANCE_SECRET_KEY")) or os.getenv("BINANCE_SECRET_KEY")
+
+    def is_configured(val):
+        return bool(val) and val.strip() != ""
 
     return {
-        "gemini": {"configured": bool(gemini)},
+        "gemini": {"configured": is_configured(gemini)},
         "forex": {
-            "configured": bool(oanda),
-            "account_id": oanda_acc,
+            "configured": is_configured(oanda),
+            "account_id": oanda_acc if is_configured(oanda_acc) else "",
             "environment": oanda_env or "practice",
         },
-        "crypto": {"configured": bool(binance and binance_sec)},
+        "crypto": {"configured": is_configured(binance) and is_configured(binance_sec)},
     }
+
 
 
 @router.post("/keys")
@@ -139,7 +145,7 @@ async def update_algorithm_settings(settings: AlgorithmSettings, _: dict = Depen
     import redis.asyncio as aioredis
     redis_client = aioredis.from_url(os.getenv("REDIS_URL", "redis://redis:6379"))
 
-    active_agent = settings.active_agent if settings.active_agent in ("loki", "thor", "odin") else "loki"
+    active_agent = settings.active_agent if settings.active_agent in VALID_AGENTS else DEFAULT_AGENT
 
     await redis_client.set("config:active_agent", active_agent)
     await redis_client.set("config:engine_enabled", "true" if settings.engine_active else "false")
@@ -159,49 +165,64 @@ async def get_algorithm_settings(_: dict = Depends(get_current_user)):
     kel_pct = await redis_client.get("config:algo:kelly_percent")
 
     return {
-        "active_agent": agent.decode() if agent else "loki",
+        "active_agent": agent.decode() if agent else DEFAULT_AGENT,
         "engine_active": engine_on.decode() == "true" if engine_on else True,
         "auto_kelly": auto_kel.decode() == "true" if auto_kel else True,
         "kelly_percent": float(kel_pct.decode()) if kel_pct else 1.0
     }
 
+@router.get("/gemini-usage")
+async def gemini_usage(_: dict = Depends(get_current_admin)):
+    """Today's Gemini call count plus the configured cap and scan intervals."""
+    from services.gemini_predictor import get_gemini_usage
+    return await get_gemini_usage()
+
+
 @router.get("/agent/stats")
 async def get_agent_stats(_: dict = Depends(get_current_user), db: AsyncSession = Depends(get_db)):
-    """Returns dynamic weights, total trades, and winrate for Odin (the self-learning agent)."""
+    """Returns total trades, and winrate for all three agents."""
     import redis.asyncio as aioredis
     redis_client = aioredis.from_url(os.getenv("REDIS_URL", "redis://redis:6379"))
 
     from services.weight_optimizer import DEFAULT_WEIGHTS
+    from services.signals import AGENT_WEIGHTS
 
-    agent = "odin"
-    key = f"agent:weights:{agent}"
-    data = await redis_client.get(key)
-    weights = json.loads(data) if data else DEFAULT_WEIGHTS
+    agents = list(VALID_AGENTS)
+    res_data = {}
 
-    # Get winrate from DB
-    query = text("""
-        SELECT
-            COUNT(*) as total,
-            SUM(CASE WHEN p.realized_pnl > 0 THEN 1 ELSE 0 END) as wins
-        FROM prediction_logs pl
-        JOIN positions p ON pl.position_id = p.id
-        WHERE p.status = 'CLOSED' AND pl.agent_used = :agent
-    """)
-    result = await db.execute(query, {"agent": agent})
-    row = result.fetchone()
+    for agent in agents:
+        if agent == "odin":
+            key = f"agent:weights:{agent}"
+            data = await redis_client.get(key)
+            weights = json.loads(data) if data else DEFAULT_WEIGHTS
+        else:
+            # Static presets (Loki M/P/T single-pillar, Thor equal blend).
+            weights = AGENT_WEIGHTS.get(agent, {})
 
-    total = row[0] if row else 0
-    wins = row[1] if row and row[1] else 0
-    winrate = round((wins / total) * 100, 2) if total > 0 else 0.0
+        # Get winrate from DB
+        query = text("""
+            SELECT
+                COUNT(*) as total,
+                SUM(CASE WHEN p.realized_pnl > 0 THEN 1 ELSE 0 END) as wins
+            FROM prediction_logs pl
+            JOIN positions p ON pl.position_id = p.id
+            WHERE p.status = 'CLOSED' AND pl.agent_used = :agent
+        """)
+        result = await db.execute(query, {"agent": agent})
+        row = result.fetchone()
 
-    return {
-        agent: {
+        total = row[0] if row else 0
+        wins = row[1] if row and row[1] else 0
+        winrate = round((wins / total) * 100, 2) if total > 0 else 0.0
+
+        res_data[agent] = {
             "name": agent.capitalize(),
             "weights": weights,
             "total_trades": total,
             "winrate": winrate
         }
-    }
+
+    return res_data
 
 class AlgorithmSettingsReset(BaseModel):
     amount: float

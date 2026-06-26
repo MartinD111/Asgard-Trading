@@ -35,6 +35,9 @@ if "passlib" not in sys.modules:
     sys.modules["passlib.handlers"] = _passlib.handlers
     sys.modules["passlib.handlers.bcrypt"] = MagicMock()
 
+if "bcrypt" not in sys.modules:
+    sys.modules["bcrypt"] = MagicMock()
+
 if "jose" not in sys.modules:
     _jose = MagicMock()
     # JWTError must be a real exception class so `except JWTError` clauses work
@@ -42,3 +45,14 @@ if "jose" not in sys.modules:
     sys.modules["jose"] = _jose
     sys.modules["jose.jwt"] = _jose.jwt
     sys.modules["jose.exceptions"] = _jose.exceptions
+
+if "google" not in sys.modules or "google.generativeai" not in sys.modules:
+    _google = MagicMock()
+    sys.modules["google"] = _google
+    sys.modules["google.generativeai"] = _google.generativeai
+
+if "chromadb" not in sys.modules:
+    _chroma = MagicMock()
+    sys.modules["chromadb"] = _chroma
+    sys.modules["chromadb.utils"] = _chroma.utils
+    sys.modules["chromadb.utils.embedding_functions"] = _chroma.utils.embedding_functions

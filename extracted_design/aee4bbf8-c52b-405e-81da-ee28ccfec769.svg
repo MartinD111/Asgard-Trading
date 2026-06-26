@@ -1,0 +1,19 @@
+<svg xmlns="http://www.w3.org/2000/svg" width="80" height="80" viewBox="0 0 80 80" role="img" aria-label="Odin avatar">
+  <defs>
+    <linearGradient id="bg" x1="0" y1="0" x2="1" y2="1">
+      <stop offset="0%" stop-color="#1A2338"></stop>
+      <stop offset="100%" stop-color="#0D1421"></stop>
+    </linearGradient>
+    <linearGradient id="ring" x1="0" y1="0" x2="1" y2="1">
+      <stop offset="0%" stop-color="#F0A500"></stop>
+      <stop offset="100%" stop-color="#4B9DFF"></stop>
+    </linearGradient>
+  </defs>
+  <rect width="80" height="80" rx="40" fill="url(#bg)"></rect>
+  
+  <g fill="none" stroke="url(#ring)" stroke-width="3" stroke-linejoin="round">
+    <polygon points="40,18 30,35 50,35"></polygon>
+    <polygon points="30,37 20,54 40,54"></polygon>
+    <polygon points="50,37 40,54 60,54"></polygon>
+  </g>
+</svg>

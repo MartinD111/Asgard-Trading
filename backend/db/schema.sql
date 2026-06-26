@@ -151,7 +151,7 @@ CREATE TABLE IF NOT EXISTS prediction_logs (
     correlation_score   NUMERIC(6, 4),
     final_score         NUMERIC(6, 4),
     direction           VARCHAR(4),
-    agent_used          VARCHAR(20) DEFAULT 'loki',
+    agent_used          VARCHAR(20) DEFAULT 'loki_m',
     reasoning           TEXT,
     trade_executed      BOOLEAN DEFAULT FALSE,
     position_id         UUID REFERENCES positions(id),
@@ -258,5 +258,8 @@ INSERT INTO system_config (key, value) VALUES
     ('final_score_threshold', '0.85'),
     ('confidence_threshold', '0.70'),
     ('max_drawdown_limit', '0.10'),
-    ('risk_per_trade', '0.01')
+    ('risk_per_trade', '0.01'),
+    ('gemini_daily_cap', '1500'),
+    ('gemini_min_interval_seconds', '58'),
+    ('news_scan_interval_seconds', '60')
 ON CONFLICT (key) DO NOTHING;

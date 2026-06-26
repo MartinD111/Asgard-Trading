@@ -23,6 +23,7 @@ import redis.asyncio as aioredis
 from services.optimizer_core import (
     apply_reward, DEFAULT_WEIGHTS, LEARNING_RATE,
     MAX_WEIGHT, MIN_WEIGHT, AGREEMENT_THRESHOLD,
+    compute_hitrate_weights, blend_weights, HITRATE_WINDOW,
 )
 
 logger = logging.getLogger(__name__)
@@ -152,10 +153,46 @@ class AgentOptimizer:
                 )
             
             await db.commit()
-            
-            # Save updated weights back
+
+            # Second learning signal: blend the per-trade nudged weights with each
+            # pillar's rolling directional hit-rate over recent closed trades.
             for agent, new_weights in agent_updates.items():
+                if not is_blocked:
+                    hitrate = await self._rolling_hitrate_weights(db, agent)
+                    if hitrate:
+                        new_weights = blend_weights(new_weights, hitrate)
+                        logger.info(f"[{agent}] rolling hit-rate weights: {hitrate}")
                 await self._save_agent_weights(agent, new_weights)
+
+    async def _rolling_hitrate_weights(self, db, agent: str) -> dict | None:
+        """
+        Compute each pillar's hit-rate over the last HITRATE_WINDOW closed trades
+        for `agent` and return normalised target weights (or None if too few).
+        """
+        query = text("""
+            SELECT pl.technical_score, pl.pattern_score, pl.gemini_prob,
+                   p.side, p.realized_pnl
+            FROM prediction_logs pl
+            JOIN positions p ON pl.position_id = p.id
+            WHERE p.status = 'CLOSED'
+              AND pl.agent_used = :agent
+              AND p.realized_pnl IS NOT NULL
+            ORDER BY p.closed_at DESC
+            LIMIT :lim
+        """)
+        result = await db.execute(query, {"agent": agent, "lim": HITRATE_WINDOW})
+        rows = result.fetchall()
+        trades = [
+            {
+                "tech": float(r[0]) if r[0] is not None else 0.0,
+                "pattern": float(r[1]) if r[1] is not None else 0.0,
+                "gemini": float(r[2]) if r[2] is not None else 0.0,
+                "side": str(r[3]),
+                "is_win": float(r[4]) > 0,
+            }
+            for r in rows
+        ]
+        return compute_hitrate_weights(trades)
 
     async def run_loop(self):
         """Background process to continuously optimize active agents."""

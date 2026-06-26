@@ -40,11 +40,11 @@ feedparser==6.0.11
 requests==2.31.0
 beautifulsoup4==4.12.3
 
-# Finance / indicators / risk
-numpy==1.26.4
-pandas==2.2.2
-pandas-ta==0.3.14b
-scipy==1.13.0
+# Finance / indicators / risk (none of these are used/imported in the codebase)
+# numpy==1.26.4
+# pandas==2.2.2
+# pandas-ta==0.3.14b
+# scipy==1.13.0
 
 # Logging
 python-json-logger==2.0.7
